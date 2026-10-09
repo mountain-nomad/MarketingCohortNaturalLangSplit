@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from cohortsplit.app import create_app
-from cohortsplit.config import load_settings
+from cohortsplit.config import ConfigError, load_settings
 
 
 @pytest.fixture
@@ -64,3 +64,12 @@ def test_no_frontend_routes_without_dist(unreachable_appdb_env: pytest.MonkeyPat
     client = TestClient(create_app(load_settings()))
 
     assert client.get("/").status_code == 404
+
+
+def test_frontend_dist_without_index_is_a_config_error(
+    unreachable_appdb_env: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    unreachable_appdb_env.setenv("COHORTSPLIT_FRONTEND_DIST", str(tmp_path / "missing"))
+
+    with pytest.raises(ConfigError, match="COHORTSPLIT_FRONTEND_DIST"):
+        load_settings()
