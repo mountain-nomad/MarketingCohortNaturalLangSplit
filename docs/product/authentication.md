@@ -61,7 +61,7 @@ admin -> Admin dashboard -> Roles -> Create role "Marketer"
 
 ### FR-A3 Dynamic RBAC
 - Model: `User ↔ Role ↔ Permission` many-to-many. A user's effective permissions are the **union** of permissions of all their roles.
-- Admin can create, rename, edit, and delete custom roles with any combination of catalog permissions.
+- Admin can create, rename, edit, and delete custom roles with any combination of **grantable** catalog permissions.
 - The **Admin** role is a protected system role: not deletable, not editable, implicitly holds all permissions. It is assigned via the Users screen or CLI.
 - **At least one active admin must always exist.** Deactivating, or removing the Admin role from, the last active admin is refused.
 - Deleting a custom role that is assigned to users requires confirmation and removes those permissions from them immediately.
@@ -72,13 +72,13 @@ MVP permission catalog:
 
 | Area | Permissions |
 |---|---|
-| Users | `user.read`, `user.create`, `user.update`, `user.deactivate`, `user.reset_password` |
-| Roles | `role.read`, `role.create`, `role.update`, `role.delete`, `role.assign` |
+| Users (admin-only) | `user.read`, `user.create`, `user.update`, `user.deactivate`, `user.reset_password` |
+| Roles (admin-only) | `role.read`, `role.create`, `role.update`, `role.delete`, `role.assign` |
 | Semantic layer | `semantic_context.read`, `semantic_context.edit`, `use_case.review`, `crawler.run` |
 | Cohorts | `cohort.create` (interpret, preview, split), `cohort.export` (download / re-download), `cohort.read_all` (see everyone's runs) |
 | Audit | `audit.read` |
 
-Role-management permissions (`role.*`, `user.*`) are privilege-escalation vectors: a non-admin holding `role.update` + `role.assign` can grant themselves anything. In MVP this is allowed but the admin page warns when granting them to a custom role. See Open Question 2.
+**Access management is admin-only.** `user.*` and `role.*` exist in the catalog so the policy layer can name them, but they are held only by the Admin role and **cannot be granted to custom roles**: the role editor does not offer them and the API refuses a custom role that includes them. This closes the privilege-escalation path where a non-admin with `role.update` + `role.assign` could grant themselves anything. Only admins manage users, roles, permissions, and export grants.
 
 ### FR-A4 Column export grants
 - Each role holds a set of **exportable columns** (`schema.table.column`) chosen from columns discovered by the crawler.
@@ -115,8 +115,8 @@ One web app; tabs are shown according to effective permissions. Hiding a tab is 
 **Admin dashboard**
 | Tab | Requires | Content |
 |---|---|---|
-| Users | `user.read` | List, create, edit, deactivate, reset password |
-| Roles | `role.read` | Roles, permissions, column export grants, assignments |
+| Users | Admin role | List, create, edit, deactivate, reset password |
+| Roles | Admin role | Roles, permissions, column export grants, assignments |
 | Semantic context | `semantic_context.read` | Business context, generated docs, use-case review (feature `semantic-context`) |
 | Audit | `audit.read` | Audit log viewer |
 
@@ -206,6 +206,8 @@ This feature delivers the dashboard shells, navigation, Account, Users, Roles, a
 - **AC-A12** Deactivating or demoting the last active admin is refused.
 - **AC-A13** Given a deactivated user, their existing sessions are refused on the next request.
 - **AC-A14** Creating a new custom role and assigning it requires no deployment or restart.
+- **AC-A14a** Creating or updating a custom role to include any `user.*` or `role.*` permission is refused by the API; the role editor does not offer them.
+- **AC-A14b** Given a non-admin user, the user list API is refused.
 
 ### Column grants
 - **AC-A15** Given no role of the user grants `users.phone`, an export or re-download requesting `phone` is refused and a denied audit event is recorded.
@@ -223,10 +225,12 @@ This feature delivers the dashboard shells, navigation, Account, Users, Roles, a
 - **AC-A23** A user's visible tabs match their effective permissions; hidden tabs' endpoints are still enforced server-side.
 - **AC-A24** A user with zero roles sees only the Account tab.
 
+## Resolved Decisions
+
+1. **Lockout and session values:** 5 failed attempts / 15-minute lockout; 8h idle timeout, 7-day absolute session lifetime (all configurable).
+2. **Privilege escalation via role management:** `user.*` and `role.*` are restricted to the Admin role and are not grantable to custom roles (FR-A3).
+3. **User visibility:** only admins can list users. Other users see only their own account.
+
 ## Open Questions
 
-Defaults are assumed above; confirm or change.
-
-1. **Lockout and session values.** Default: 5 attempts / 15 min lockout; 8h idle, 7-day absolute session. OK?
-2. **Privilege escalation via role management.** A non-admin custom role holding `role.update` + `role.assign` can grant itself everything. Options: (a) allow, with a UI warning (default); (b) restrict `role.*` and `user.*` to the Admin role only, so only admins manage access.
-3. **Can users see who else is on the platform?** Default: only holders of `user.read`.
+None.
