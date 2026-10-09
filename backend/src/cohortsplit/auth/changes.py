@@ -6,6 +6,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from cohortsplit.audit.service import Actor, AuditEventIn, AuditService, Outcome
+from cohortsplit.auth.errors import ApiError
 
 
 @dataclass(frozen=True)
@@ -41,3 +42,32 @@ class ChangeContext:
                 metadata=metadata or {},
             ),
         )
+
+    def deny(
+        self,
+        action: str,
+        error: ApiError,
+        *,
+        target_type: str,
+        target_id: object,
+        **metadata: object,
+    ) -> ApiError:
+        """Audit a refused change in its own transaction (it survives the rollback).
+
+        Best effort: the refusal stands even if the audit store is down. Returns ``error``
+        for the caller to raise.
+        """
+        self.audit.record_detached(
+            AuditEventIn(
+                action=action,
+                outcome="denied",
+                actor=self.actor,
+                occurred_at=self.now,
+                target_type=target_type,
+                target_id=str(target_id),
+                request_id=self.request_id,
+                metadata={"reason": error.code, **metadata},
+            ),
+            sensitive=False,
+        )
+        return error

@@ -71,6 +71,9 @@ class AuthService:
                 metadata={"reason": reason, **extra},
             )
 
+        # Serialize attempts per account under the throttle row lock (held until commit),
+        # then check the lock: no attempt is verified on stale lockout state.
+        lockout.acquire(db, normalized, now)
         remaining = lockout.locked_for(db, normalized, now)
         if remaining is not None:
             self._record(db, failure_event("locked"), sensitive=False)
@@ -181,6 +184,7 @@ class AuthService:
                 metadata=metadata,
             )
 
+        lockout.acquire(db, user.email, now)
         remaining = lockout.locked_for(db, user.email, now)
         if remaining is not None:
             self._record(db, event("denied", reason="locked"), sensitive=False)

@@ -15,6 +15,7 @@ from cohortsplit.audit import actions
 from cohortsplit.audit.service import Actor, AuditEventIn, AuditService
 from cohortsplit.auth.clock import utcnow
 from cohortsplit.auth.passwords import PasswordPolicyError, validate_password_policy
+from cohortsplit.auth.user_admin import MAX_DISPLAY_NAME_LENGTH
 from cohortsplit.auth.users import (
     InvalidEmailError,
     admin_role,
@@ -74,16 +75,22 @@ def _create_admin(args: argparse.Namespace) -> int:
     actor = Actor.cli()
 
     with factory() as db:
-        role = admin_role(db, for_update=True)
         user = find_by_email(db, email)
+        password = None
         if user is None:
+            # Prompt before taking any lock: the operator may take their time.
             password = _prompt_password("Password")
             if password is None:
                 return 1
+        role = admin_role(db, for_update=True)
+        user = find_by_email(db, email)
+        if user is None:
+            if password is None:  # created concurrently and removed again: never happens
+                return _fail("user state changed while prompting; run the command again")
             user = create_user(
                 db,
                 email=email,
-                display_name=email.split("@")[0],
+                display_name=email.split("@")[0][:MAX_DISPLAY_NAME_LENGTH],
                 password=password,
                 must_change_password=False,
                 now=now,

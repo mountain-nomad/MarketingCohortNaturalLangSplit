@@ -8,6 +8,7 @@ import re
 from collections.abc import Iterable
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from cohortsplit.audit import actions
@@ -52,6 +53,48 @@ def validate_name(name: str) -> str:
     return cleaned
 
 
+def _name_taken() -> ConflictError:
+    return ConflictError("role_name_taken", "A role with this name already exists.")
+
+
+def _flush_role(db: Session) -> None:
+    """Flush; the unique index on lower(name) catches races the pre-check missed."""
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        if "uq_roles_name_lower" in str(exc.orig):
+            raise _name_taken() from None
+        raise
+
+
+def _validate_permissions_audited(
+    ctx: ChangeContext, keys: Iterable[str], action: str, target_id: object
+) -> list[str]:
+    try:
+        return validate_permissions(keys)
+    except UnprocessableError as error:
+        if error.code == "permission_not_grantable":
+            raise ctx.deny(
+                action,
+                error,
+                target_type="role",
+                target_id=target_id,
+                permissions=error.extra.get("permissions", []),
+            ) from None
+        raise
+
+
+def _protected(ctx: ChangeContext, role: Role, action: str) -> ApiError:
+    return ctx.deny(
+        action,
+        SystemRoleProtectedError(),
+        target_type="role",
+        target_id=role.id,
+        role_name=role.name,
+    )
+
+
 def validate_permissions(keys: Iterable[str]) -> list[str]:
     requested = sorted(set(keys))
     unknown = [k for k in requested if k not in ALL_PERMISSIONS]
@@ -86,7 +129,7 @@ def _ensure_name_free(db: Session, name: str, exclude_role_id: int | None = None
     if exclude_role_id is not None:
         statement = statement.where(Role.id != exclude_role_id)
     if db.execute(statement).first() is not None:
-        raise ConflictError("role_name_taken", "A role with this name already exists.")
+        raise _name_taken()
 
 
 def permissions_of(db: Session, role: Role) -> list[str]:
@@ -131,7 +174,7 @@ def create_role(
     export_columns: Iterable[str],
 ) -> Role:
     cleaned = validate_name(name)
-    keys = validate_permissions(permissions)
+    keys = _validate_permissions_audited(ctx, permissions, actions.ROLE_CREATE, "new")
     columns = validate_columns(export_columns)
     _ensure_name_free(db, cleaned)
     role = Role(
@@ -142,7 +185,7 @@ def create_role(
         updated_at=ctx.now,
     )
     db.add(role)
-    db.flush()
+    _flush_role(db)
     _replace_permissions(db, role, keys)
     _replace_columns(db, role, columns)
     db.flush()
@@ -171,7 +214,7 @@ def update_role(
     export_columns: Iterable[str] | None,
 ) -> Role:
     if role.is_system:
-        raise SystemRoleProtectedError()
+        raise _protected(ctx, role, actions.ROLE_UPDATE)
     changes: dict[str, object] = {}
 
     if name is not None:
@@ -184,7 +227,7 @@ def update_role(
         changes["description"] = {"before": role.description, "after": description.strip()}
         role.description = description.strip()
     if permissions is not None:
-        keys = validate_permissions(permissions)
+        keys = _validate_permissions_audited(ctx, permissions, actions.ROLE_UPDATE, role.id)
         before = permissions_of(db, role)
         if keys != before:
             _replace_permissions(db, role, keys)
@@ -198,7 +241,7 @@ def update_role(
 
     if changes:
         role.updated_at = ctx.now
-        db.flush()
+        _flush_role(db)
         ctx.record(
             db,
             actions.ROLE_UPDATE,
@@ -211,7 +254,7 @@ def update_role(
 
 def delete_role(db: Session, ctx: ChangeContext, role: Role, *, confirm: bool) -> None:
     if role.is_system:
-        raise SystemRoleProtectedError()
+        raise _protected(ctx, role, actions.ROLE_DELETE)
     members = member_ids_of(db, role)
     if members and not confirm:
         raise ConflictError(
@@ -232,6 +275,14 @@ def delete_role(db: Session, ctx: ChangeContext, role: Role, *, confirm: bool) -
             "member_ids": members,
         },
     )
+    for user_id in members:
+        ctx.record(
+            db,
+            actions.ROLE_UNASSIGN,
+            target_type="user",
+            target_id=user_id,
+            metadata={"role_id": role.id, "role_name": role.name, "via": "role.delete"},
+        )
     db.execute(delete(UserRole).where(UserRole.role_id == role.id))
     db.execute(delete(RolePermission).where(RolePermission.role_id == role.id))
     db.execute(delete(RoleExportColumn).where(RoleExportColumn.role_id == role.id))
@@ -241,7 +292,7 @@ def delete_role(db: Session, ctx: ChangeContext, role: Role, *, confirm: bool) -
 
 def set_members(db: Session, ctx: ChangeContext, role: Role, user_ids: Iterable[int]) -> None:
     if role.is_system:
-        raise SystemRoleProtectedError()
+        raise _protected(ctx, role, actions.ROLE_ASSIGN)
     wanted = set(user_ids)
     found = (
         set(db.execute(select(User.id).where(User.id.in_(wanted))).scalars()) if wanted else set()

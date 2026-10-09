@@ -29,8 +29,14 @@ class LockoutPolicy:
         )
 
 
-def _throttle(db: Session, email: str, now: datetime) -> LoginThrottle:
-    row = db.get(LoginThrottle, email, with_for_update=True)
+def acquire(db: Session, email: str, now: datetime) -> LoginThrottle:
+    """Lock (creating if needed) the throttle row for ``email`` until the transaction ends.
+
+    Call before verifying a password: concurrent attempts for one account then run one
+    at a time, each seeing the latest count and lock, so parallel guessing cannot
+    exceed the limit. Different accounts never contend.
+    """
+    row = db.get(LoginThrottle, email, with_for_update=True, populate_existing=True)
     if row is not None:
         return row
     row = LoginThrottle(email=email, failure_count=0, updated_at=now)
@@ -54,7 +60,7 @@ def locked_for(db: Session, email: str, now: datetime) -> int | None:
 
 def register_failure(db: Session, email: str, now: datetime, policy: LockoutPolicy) -> bool:
     """Count one failure. Returns True when this failure starts a lockout."""
-    row = _throttle(db, email, now)
+    row = acquire(db, email, now)
     if row.window_started_at is None or now - row.window_started_at >= policy.window:
         row.failure_count = 1
         row.window_started_at = now

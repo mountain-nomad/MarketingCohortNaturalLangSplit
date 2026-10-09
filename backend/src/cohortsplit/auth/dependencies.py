@@ -92,11 +92,31 @@ class SessionContext:
     user: User
 
 
+def _audit_refusal(
+    request: Request, audit: AuditService, clock: Clock, user_id: int, reason: str
+) -> None:
+    """Best-effort audit of a refused request by an authenticated user (FR-A5)."""
+    audit.record_detached(
+        AuditEventIn(
+            action=actions.ACCESS_DENIED,
+            outcome="denied",
+            actor=Actor.user(user_id),
+            occurred_at=clock(),
+            target_type="endpoint",
+            target_id=f"{request.method} {request.url.path}",
+            request_id=get_request_id(request),
+            metadata={"reason": reason},
+        ),
+        sensitive=False,
+    )
+
+
 def current_session(
     request: Request,
     db: DbSession,
     settings: Annotated[Settings, Depends(get_settings)],
     clock: Annotated[Clock, Depends(get_clock)],
+    audit: Annotated[AuditService, Depends(get_audit)],
 ) -> SessionContext:
     """A live session of an active user; allowed even while a password change is pending."""
     token = request.cookies.get(SESSION_COOKIE)
@@ -109,6 +129,7 @@ def current_session(
     if request.method not in SAFE_METHODS and not csrf_matches(
         session, request.headers.get(CSRF_HEADER)
     ):
+        _audit_refusal(request, audit, clock, user.id, "csrf_failed")
         raise CsrfError()
     return SessionContext(session, user)
 
@@ -117,12 +138,16 @@ CurrentSession = Annotated[SessionContext, Depends(current_session)]
 
 
 def current_principal(
+    request: Request,
     context: CurrentSession,
     db: DbSession,
     policy: Annotated[PolicyService, Depends(get_policy)],
+    audit: Annotated[AuditService, Depends(get_audit)],
+    clock: Annotated[Clock, Depends(get_clock)],
 ) -> Principal:
     """The authenticated caller with permissions evaluated from current DB state."""
     if context.user.must_change_password:
+        _audit_refusal(request, audit, clock, context.user.id, "password_change_required")
         raise PasswordChangeRequiredError()
     return policy.principal_for(db, context.user, context.session.id)
 

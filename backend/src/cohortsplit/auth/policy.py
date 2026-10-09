@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from cohortsplit.audit import actions
 from cohortsplit.audit.service import Actor, AuditEventIn, AuditService, AuditWriteError
-from cohortsplit.auth.catalog import ALL_PERMISSIONS
+from cohortsplit.auth.catalog import ALL_PERMISSIONS, GRANTABLE_PERMISSIONS
 from cohortsplit.auth.errors import ApiError, PermissionDeniedError
 from cohortsplit.auth.models import Role, RoleExportColumn, RolePermission, User, UserRole
 
@@ -93,8 +93,9 @@ class PolicyService:
                 RolePermission.role_id.in_([role.id for role in roles])
             )
         ).scalars()
-        # Intersect with the code catalog: a stale row never grants an unknown permission.
-        return frozenset(keys) & ALL_PERMISSIONS
+        # Custom roles can only ever hold grantable permissions: a stray row (manual SQL, a
+        # restore) never confers user.*/role.* or an unknown permission.
+        return frozenset(keys) & GRANTABLE_PERMISSIONS
 
     def effective_permissions(self, db: Session, user_id: int) -> frozenset[str]:
         return self.permissions_for_roles(db, self.roles_of(db, user_id))

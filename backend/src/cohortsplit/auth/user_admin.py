@@ -104,7 +104,7 @@ def _unassign(db: Session, ctx: ChangeContext, user: User, role: Role) -> None:
     )
 
 
-def _refuse_if_last_active_admin(db: Session, user: User) -> None:
+def _refuse_if_last_active_admin(db: Session, ctx: ChangeContext, user: User, action: str) -> None:
     """Call before removing ``user`` from the active admins (lock held until commit)."""
     admin = admin_role(db, for_update=True)
     if (
@@ -112,9 +112,16 @@ def _refuse_if_last_active_admin(db: Session, user: User) -> None:
         and has_role(db, user.id, admin.id)
         and count_active_admins(db, admin.id) <= 1
     ):
-        raise ConflictError(
-            "last_admin",
-            "At least one active admin must remain. Make another user an admin first.",
+        raise ctx.deny(
+            action,
+            ConflictError(
+                "last_admin",
+                "At least one active admin must remain. Make another user an admin first.",
+            ),
+            target_type="user",
+            target_id=user.id,
+            role_id=admin.id,
+            role_name=admin.name,
         )
 
 
@@ -145,9 +152,14 @@ def create(
             must_change_password=True,
             now=ctx.now,
         )
-    except IntegrityError:  # concurrent create with the same email
+    except IntegrityError as exc:
         db.rollback()
-        raise ConflictError("email_taken", "A user with this email already exists.") from None
+        detail = str(exc.orig)
+        if "uq_users_email" in detail or "users.email" in detail:  # concurrent duplicate
+            raise ConflictError("email_taken", "A user with this email already exists.") from None
+        if "email" in detail:  # e.g. lowercase/length CHECK disagreeing with validation
+            raise UnprocessableError("invalid_email", "Enter a valid email address.") from None
+        raise
     ctx.record(db, actions.USER_CREATE, target_type="user", target_id=user.id)
     for role in sorted(roles, key=lambda r: r.name):
         _assign(db, ctx, user, role)
@@ -177,7 +189,7 @@ def set_roles(db: Session, ctx: ChangeContext, user: User, role_ids: Iterable[in
     removed = [current[i] for i in sorted(set(current) - set(wanted))]
     added = [wanted[i] for i in sorted(set(wanted) - set(current))]
     if any(role.is_system for role in removed):
-        _refuse_if_last_active_admin(db, user)
+        _refuse_if_last_active_admin(db, ctx, user, actions.ROLE_UNASSIGN)
     for role in added:
         _assign(db, ctx, user, role)
     for role in removed:
@@ -188,7 +200,7 @@ def set_roles(db: Session, ctx: ChangeContext, user: User, role_ids: Iterable[in
 def deactivate(db: Session, ctx: ChangeContext, user: User) -> User:
     if not user.is_active:
         return user
-    _refuse_if_last_active_admin(db, user)
+    _refuse_if_last_active_admin(db, ctx, user, actions.USER_DEACTIVATE)
     user.is_active = False
     user.updated_at = ctx.now
     revoke_user_sessions(db, user.id, ctx.now)
