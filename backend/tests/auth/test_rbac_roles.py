@@ -273,7 +273,8 @@ def test_admin_role_cannot_be_edited(
     stored = admin_client.get(f"/api/admin/roles/{admin.id}").json()
     assert stored["name"] == "Admin"
     assert stored["export_columns"] == []
-    assert audit_events.of("role.update") == []
+    # Refusals are audited (FR-A5 "denied actions are audited"); nothing succeeded.
+    assert [e.outcome for e in audit_events.of("role.update")] == ["denied"] * 4
 
 
 def test_admin_role_cannot_be_deleted(admin_client: ApiClient, db: Session) -> None:
