@@ -67,10 +67,10 @@ def _mount_frontend(app: FastAPI, dist: Path) -> None:
         return FileResponse(index)
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, engine: Engine | None = None) -> FastAPI:
     settings = settings or load_settings()
     _configure_logging(settings.log_level)
-    engine = create_appdb_engine(settings)
+    engine = engine or create_appdb_engine(settings)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
