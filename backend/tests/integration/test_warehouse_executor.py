@@ -16,6 +16,7 @@ from cohortsplit.warehouse import (
     WarehouseQueryError,
     WarehouseUnavailableError,
 )
+from tests.integration.conftest import ScratchWarehouse
 
 pytestmark = pytest.mark.integration
 
@@ -155,3 +156,19 @@ def test_wrong_password_is_unavailable_without_password(warehouse_ro_dsn: str) -
 
     assert wrong not in str(excinfo.value)
     assert excinfo.value.__cause__ is None or wrong not in str(excinfo.value.__cause__)
+
+
+def test_read_only_transaction_refuses_writes_even_for_a_privileged_role(
+    warehouse_admin_dsn: str, scratch: ScratchWarehouse
+) -> None:
+    """Pins the executor's own READ ONLY layer: the admin role could write, the executor
+    must not (TEST-ONLY admin DSN; the application never uses it)."""
+    executor = ReadOnlyExecutor(SecretStr(warehouse_admin_dsn))
+    target = f'"{scratch.schema}".products'
+
+    with pytest.raises(ReadOnlyViolationError):
+        executor.execute(f"INSERT INTO {target} VALUES (999, 'probe')")  # noqa: S608
+    with pytest.raises(ReadOnlyViolationError):
+        executor.execute(f"DELETE FROM {target}")  # noqa: S608
+
+    assert executor.execute(f"SELECT count(*) FROM {target}").rows == ((3,),)  # noqa: S608

@@ -331,3 +331,86 @@ def test_list_confirmed_use_cases_excludes_pending(
     crawl_store.set_use_case_status(chosen.id, "confirmed")
 
     assert [u.id for u in crawl_store.list_confirmed_use_cases()] == [chosen.id]
+
+
+@pytest.mark.parametrize("schemas", [("cs_no_such_schema",), ("SCRATCH", "cs_no_such_schema")])
+def test_crawl_of_missing_schema_fails_and_keeps_previous_content(
+    ro_adapter: PostgresWarehouseAdapter,
+    crawl_store: CrawlStore,
+    scratch: ScratchWarehouse,
+    schemas: tuple[str, ...],
+) -> None:
+    _crawl(ro_adapter, crawl_store, scratch)
+    confirmed = _generated(crawl_store, "orders_with_status")
+    crawl_store.set_use_case_status(confirmed.id, "confirmed")
+    before = _snapshot(crawl_store)
+    configured = tuple(scratch.schema if s == "SCRATCH" else s for s in schemas)
+
+    with pytest.raises(CrawlFailedError, match="cs_no_such_schema") as excinfo:
+        run_crawl(ro_adapter, crawl_store, settings=CrawlerSettings(schemas=configured))
+
+    assert _snapshot(crawl_store) == before
+    failed = crawl_store.get_run(excinfo.value.run_id)
+    assert failed is not None
+    assert failed.status == "failed"
+
+
+def test_crawl_where_role_can_read_no_tables_fails_and_keeps_content(
+    ro_adapter: PostgresWarehouseAdapter, crawl_store: CrawlStore, scratch: ScratchWarehouse
+) -> None:
+    _crawl(ro_adapter, crawl_store, scratch)
+    confirmed = _generated(crawl_store, "cart_with_status")
+    crawl_store.set_use_case_status(confirmed.id, "confirmed")
+    before = _snapshot(crawl_store)
+
+    scratch.admin("REVOKE SELECT ON ALL TABLES IN SCHEMA {s} FROM cohortsplit_ro")
+    with pytest.raises(CrawlFailedError, match="no tables"):
+        _crawl(ro_adapter, crawl_store, scratch)
+
+    assert _snapshot(crawl_store) == before
+
+
+def test_scoped_crawl_keeps_generated_docs_of_other_schemas(
+    ro_adapter: PostgresWarehouseAdapter, crawl_store: CrawlStore, scratch: ScratchWarehouse
+) -> None:
+    run_crawl(ro_adapter, crawl_store, settings=CrawlerSettings(schemas=("public",)))
+    public_docs = [d for d in crawl_store.list_docs() if d.doc_key.startswith("table:public.")]
+    assert len(public_docs) == 32
+
+    _crawl(ro_adapter, crawl_store, scratch)
+
+    after = crawl_store.list_docs()
+    assert [d for d in after if d.doc_key.startswith("table:public.")] == public_docs
+    assert any(d.doc_key.startswith(f"table:{scratch.schema}.") for d in after)
+
+
+def test_failure_while_recording_failure_still_reports_crawl_error(
+    ro_adapter: PostgresWarehouseAdapter,
+    crawl_store: CrawlStore,
+    scratch: ScratchWarehouse,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("appdb went away")
+
+    monkeypatch.setattr(crawl_store, "mark_run_failed", broken)
+
+    with pytest.raises(CrawlFailedError, match="unreachable"):
+        _crawl(FailingAdapter(ro_adapter, "orders"), crawl_store, scratch)
+
+
+def test_interrupted_crawl_is_marked_failed(
+    ro_adapter: PostgresWarehouseAdapter, crawl_store: CrawlStore, scratch: ScratchWarehouse
+) -> None:
+    class InterruptingAdapter(FailingAdapter):
+        def describe_table(self, table: TableRef) -> TableMetadata:
+            raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        _crawl(InterruptingAdapter(ro_adapter, "orders"), crawl_store, scratch)
+
+    run = crawl_store.latest_run()
+    assert run is not None
+    assert run.status == "failed"
+    assert run.error is not None
+    assert "interrupted" in run.error

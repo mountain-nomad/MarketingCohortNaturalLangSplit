@@ -3,6 +3,7 @@
 import pytest
 
 from cohortsplit.crawler.entities import detect_user_table
+from cohortsplit.crawler.errors import CrawlScopeError
 from cohortsplit.crawler.metadata import collect_catalog
 from cohortsplit.crawler.sampling import SamplingPolicy
 from cohortsplit.crawler.settings import DEFAULT_SAMPLE_DENYLIST
@@ -218,3 +219,99 @@ def test_detect_user_table() -> None:
     assert detect_user_table(catalog.tables, "public.nope") is None
     no_users = [t for t in catalog.tables if t.name != "users"]
     assert detect_user_table(no_users) is None
+
+
+def test_missing_configured_schema_fails_before_anything_is_read() -> None:
+    adapter = FakeAdapter(shop_tables())
+
+    with pytest.raises(CrawlScopeError, match="nope"):
+        collect_catalog(adapter, _policy(), schemas=["public", "nope"])
+
+    assert not [c for c in adapter.calls if c[0] == "describe_table"]
+
+
+def test_empty_catalog_fails() -> None:
+    tables = [FakeTable(TableRef("other", "x"), [col("status")])]
+
+    with pytest.raises(CrawlScopeError, match="no tables"):
+        collect_catalog(FakeAdapter([]), _policy())
+    with pytest.raises(CrawlScopeError, match="other"):
+        # The schema exists but the role can read none of its tables.
+        collect_catalog(_EmptySchemaAdapter(tables), _policy(), schemas=["other"])
+
+
+class _EmptySchemaAdapter(FakeAdapter):
+    def list_tables(self, schema: str) -> list[TableRef]:
+        self._record("list_tables", schema)
+        return []
+
+
+def test_key_examples_only_for_template_role_tables_with_integer_keys() -> None:
+    tables = [
+        *shop_tables(),
+        FakeTable(
+            TableRef("public", "coupons"),
+            [col("code", data_type="text")],
+            ("code",),
+            values={"code": ["SECRET10"]},
+        ),
+        FakeTable(
+            TableRef("public", "promo_redemptions"),
+            [col("id", "numeric")],
+            ("id",),
+            values={"id": ["5"]},
+        ),
+    ]
+    adapter = FakeAdapter(tables)
+
+    catalog = collect_catalog(adapter, _policy())
+
+    examples = {c[1] for c in adapter.calls if c[0] == "get_key_examples"}
+    assert examples == {"public.products", "public.categories"}
+    for name in ("coupons", "promo_redemptions", "orders", "carts", "addresses"):
+        profile = catalog.profile(f"public.{name}")
+        assert profile is not None
+        assert profile.key_examples == ()
+    assert "SECRET10" not in catalog.model_dump_json()
+
+
+def test_string_keyed_product_table_gets_no_key_examples() -> None:
+    tables = [
+        FakeTable(TableRef("public", "users"), [col("user_id", "numeric")], ("user_id",)),
+        FakeTable(
+            TableRef("public", "products"),
+            [col("sku", data_type="text")],
+            ("sku",),
+            values={"sku": ["SKU-1"]},
+        ),
+    ]
+    adapter = FakeAdapter(tables)
+
+    catalog = collect_catalog(adapter, _policy())
+
+    assert not [c for c in adapter.calls if c[0] == "get_key_examples"]
+    profile = catalog.profile("public.products")
+    assert profile is not None
+    assert profile.key_examples == ()
+
+
+def test_unknown_row_count_is_not_sampled() -> None:
+    tables = [
+        FakeTable(
+            TableRef("public", "people_view", kind="view"),
+            [col("nickname")],
+            row_count=None,
+            values={"nickname": ["a", "b", "c"]},
+        )
+    ]
+    adapter = FakeAdapter(tables)
+
+    catalog = collect_catalog(adapter, _policy())
+
+    profile = catalog.profile("public.people_view")
+    assert profile is not None
+    entry = profile.column("nickname")
+    assert entry is not None
+    assert entry.values is None
+    assert "row count unknown" in entry.reason
+    assert ("public.people_view", "nickname") not in adapter.sampled_columns()

@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Literal
 
-TableKind = Literal["table", "view", "materialized_view", "foreign_table"]
+TableKind = Literal["table", "partitioned_table", "view", "materialized_view", "foreign_table"]
 TypeCategory = Literal["string", "boolean", "enum", "numeric", "datetime", "other"]
 
 

@@ -4,6 +4,7 @@ import pytest
 from pydantic import SecretStr
 
 from cohortsplit.warehouse import PostgresWarehouseAdapter, ReadOnlyExecutor, TableRef
+from tests.integration.conftest import ScratchWarehouse
 
 pytestmark = pytest.mark.integration
 
@@ -94,3 +95,27 @@ def test_distinct_values_none_when_above_cap(adapter: PostgresWarehouseAdapter) 
 
 def test_key_examples(adapter: PostgresWarehouseAdapter) -> None:
     assert adapter.get_key_examples(_table(adapter, "products"), "product_id", 3) == ["1", "2", "3"]
+
+
+def test_partitioned_table_listed_once_and_counted_from_partitions(
+    adapter: PostgresWarehouseAdapter, scratch: ScratchWarehouse
+) -> None:
+    scratch.admin(
+        "CREATE TABLE {s}.events (id bigint, at date NOT NULL) PARTITION BY RANGE (at);"
+        "CREATE TABLE {s}.events_2025 PARTITION OF {s}.events "
+        "FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');"
+        "CREATE TABLE {s}.events_2026 PARTITION OF {s}.events "
+        "FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');"
+        "INSERT INTO {s}.events SELECT i, DATE '2025-06-01' + (i % 400) "
+        "FROM generate_series(1, 500) i;"
+        "ANALYZE {s}.events;"
+        "GRANT SELECT ON ALL TABLES IN SCHEMA {s} TO cohortsplit_ro;"
+    )
+
+    tables = {t.name: t for t in adapter.list_tables(scratch.schema)}
+
+    assert "events" in tables
+    assert "events_2025" not in tables
+    assert tables["events"].kind == "partitioned_table"
+    meta = adapter.describe_table(tables["events"])
+    assert meta.estimated_row_count == 500

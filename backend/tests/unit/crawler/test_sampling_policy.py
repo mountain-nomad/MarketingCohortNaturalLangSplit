@@ -38,6 +38,17 @@ def _policy(**kwargs: object) -> SamplingPolicy:
         "ship_line2",
         "postal_code",
         "ship_name",
+        "ssn",
+        "national_ssn",
+        "birth_date",
+        "dob",
+        "last_ip_address",
+        "passport_no",
+        "iban",
+        "card_number",
+        "tax_id",
+        "full_name",
+        "username",
     ],
 )
 def test_default_denylist_blocks(name: str) -> None:
@@ -123,3 +134,18 @@ def test_max_distinct_validated() -> None:
     with pytest.raises(ValueError, match="max_distinct"):
         _policy(max_distinct=0)
     assert _policy(max_distinct=7).max_distinct == 7
+
+
+@pytest.mark.parametrize(
+    ("category", "data_type"),
+    [("string", "text"), ("numeric", "numeric(12,2)"), ("string", "uuid")],
+)
+def test_key_examples_only_for_integer_keys(category: TypeCategory, data_type: str) -> None:
+    decision = _policy().decide_key_example(ORDERS, col("code", category, data_type=data_type))
+
+    assert not decision.allowed
+
+
+@pytest.mark.parametrize("data_type", ["smallint", "integer", "bigint"])
+def test_key_examples_allowed_for_integer_types(data_type: str) -> None:
+    assert _policy().decide_key_example(ORDERS, col("id", "numeric", data_type=data_type)).allowed
