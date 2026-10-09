@@ -37,8 +37,12 @@ WRITE_STATEMENTS = {
         "INSERT INTO users (email, password_hash, first_name, last_name) "
         "VALUES ('probe@example.com', 'x', 'probe', 'probe')"
     ),
-    "update": "UPDATE users SET first_name = 'probe' WHERE user_id = (SELECT min(user_id) FROM users)",
-    "delete": "DELETE FROM order_status_history WHERE order_id = (SELECT min(order_id) FROM orders)",
+    "update": (
+        "UPDATE users SET first_name = 'probe' WHERE user_id = (SELECT min(user_id) FROM users)"
+    ),
+    "delete": (
+        "DELETE FROM order_status_history WHERE order_id = (SELECT min(order_id) FROM orders)"
+    ),
     "create_table": "CREATE TABLE public.cohortsplit_probe (id int)",
     "create_temp_table": "CREATE TEMP TABLE cohortsplit_probe_tmp (id int)",
     "drop_table": "DROP TABLE users",
@@ -73,7 +77,8 @@ def test_ecommerce_tables_exist(ro_conn: psycopg.Connection) -> None:
         "WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"
     ).fetchall()
 
-    assert EXPECTED_TABLES <= {r[0] for r in rows}
+    missing = EXPECTED_TABLES - {r[0] for r in rows}
+    assert not missing, f"missing ecommerce tables: {sorted(missing)}"
 
 
 def test_select_works_and_users_seeded(ro_conn: psycopg.Connection) -> None:
