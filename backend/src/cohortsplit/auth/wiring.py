@@ -15,7 +15,9 @@ from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import sessionmaker
 from starlette.responses import Response
 
+from cohortsplit.audit import api as audit_api
 from cohortsplit.audit.service import AuditService, AuditWriteError
+from cohortsplit.auth import admin_api
 from cohortsplit.auth import api as auth_api
 from cohortsplit.auth.dependencies import AuthState, CurrentPrincipal
 from cohortsplit.auth.errors import ApiError, ServiceUnavailableError
@@ -93,7 +95,7 @@ def install_auth(app: FastAPI, settings: Settings, engine: Engine) -> None:
         settings=settings,
         session_factory=session_factory,
         audit=audit,
-        policy=PolicyService(),
+        policy=PolicyService(audit),
         auth=AuthService(settings, audit),
     )
 
@@ -115,5 +117,7 @@ def install_auth(app: FastAPI, settings: Settings, engine: Engine) -> None:
         return response
 
     app.include_router(auth_api.router)
+    app.include_router(admin_api.router)
+    app.include_router(audit_api.router)
     if settings.api_docs_enabled:
         app.include_router(_docs_router(app))
