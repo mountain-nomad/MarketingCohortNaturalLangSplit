@@ -118,6 +118,34 @@ In compose, set `CRAWLER_SAMPLING_ENABLED`, `CRAWLER_SAMPLE_DENYLIST` and
 `CRAWLER_SCHEMAS` in `.env`. The rulings behind these defaults are in
 [`docs/decisions/0001-warehouse-crawler-rulings.md`](docs/decisions/0001-warehouse-crawler-rulings.md).
 
+## Semantic context (admin page)
+
+The **Semantic context** tab (needs `semantic_context.read`) is where an analyst
+turns crawler output into reviewed business meaning:
+
+1. **Crawler** — with `crawler.run`, press *Run crawler* (or `POST /api/crawler/runs`).
+   One crawl runs at a time across the API and `cohortsplit crawl`; a second one gets
+   409. Re-crawls never overwrite business context or reviewed use cases.
+2. **Generated docs** — read-only tables, columns, keys, relationships, row counts and
+   the sample values the current sampling policy permits.
+3. **Business context** — with `semantic_context.edit`, typed entries: `term`,
+   `metric` (e.g. `purchase` = `public.orders.status in [paid, shipped, delivered]`),
+   `status_semantics`, `time_window`, `exclusion` and `canonical_user_id`
+   (demo: `public.users.user_id`). Every table/column must exist in the latest crawl.
+4. **Use cases** — with `use_case.review`, confirm, edit (becomes human-authored and
+   confirmed) or reject generated examples; `needs_rereview` items come first.
+
+Only confirmed use cases, business context, raw schema metadata and policy-permitted
+samples are ever handed to the cohort assistant. Every content change produces a new
+**semantic version** (`GET /api/semantic/version`, history at
+`/api/semantic/versions`); saving identical content keeps it. Details and rulings:
+[`docs/decisions/0002-semantic-context-rulings.md`](docs/decisions/0002-semantic-context-rulings.md).
+
+Try it locally after `make up` and `docker compose exec app cohortsplit create-admin
+--email admin@example.com`: sign in at `http://127.0.0.1:${APP_PORT}`, open
+*Semantic context → Crawler*, run a crawl, add a `canonical_user_id` entry, and confirm
+a use case.
+
 ## Security notes
 
 - Never commit `.env`; `.env.example` contains placeholders only.

@@ -223,7 +223,7 @@ Backend API tests reuse the auth fixtures (`tests/semantic/conftest.py`): data t
 
 ## Rulings
 
-S1 business-context shape; S2 canonical user id resolution; S3 version formula; S4 edit = human + confirmed; S5 confirm requires resolvable references; S6 stale entries excluded from prompt; S7 synchronous crawl with advisory lock; S8 GET use cases / runs need `semantic_context.read`. Recorded in `docs/decisions/0002-semantic-context-rulings.md`.
+S1 business-context shape; S2 canonical user id resolution (no fallback); S3 version formula and history; S4 edit = human + confirmed; S5 confirm requires resolvable references; S6 stale entries excluded from prompt; S7 samples re-checked against today's policy; S8 synchronous, exclusive crawl API; S9 reads need `semantic_context.read`; S10 audit. Recorded in `docs/decisions/0002-semantic-context-rulings.md`.
 
 ## Acceptance criteria
 
