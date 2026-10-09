@@ -1,0 +1,63 @@
+# Local / demo stack. Copy .env.example to .env first.
+# Ports are published on 127.0.0.1 only. TLS termination is the deployer's responsibility.
+
+name: cohortsplit
+
+services:
+  warehouse:
+    build:
+      context: docker/warehouse
+    environment:
+      POSTGRES_USER: warehouse_admin
+      POSTGRES_PASSWORD: ${WAREHOUSE_ADMIN_PASSWORD:?set WAREHOUSE_ADMIN_PASSWORD in .env}
+      WAREHOUSE_RO_PASSWORD: ${WAREHOUSE_RO_PASSWORD:?set WAREHOUSE_RO_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${WAREHOUSE_PORT:-55432}:5432"
+    volumes:
+      - warehouse-data:/var/lib/postgresql/data
+    healthcheck:
+      # TCP is only opened by the final server, after all init scripts (seed + role) ran.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "warehouse_admin", "-d", "ecommerce"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  appdb:
+    image: postgres:16.4-alpine
+    environment:
+      POSTGRES_DB: ${APPDB_NAME:-cohortsplit}
+      POSTGRES_USER: ${APPDB_USER:-cohortsplit}
+      POSTGRES_PASSWORD: ${APPDB_PASSWORD:?set APPDB_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${APPDB_PORT:-55433}:5432"
+    volumes:
+      - appdb-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    environment:
+      COHORTSPLIT_APPDB_HOST: appdb
+      COHORTSPLIT_APPDB_PORT: "5432"
+      COHORTSPLIT_APPDB_NAME: ${APPDB_NAME:-cohortsplit}
+      COHORTSPLIT_APPDB_USER: ${APPDB_USER:-cohortsplit}
+      COHORTSPLIT_APPDB_PASSWORD: ${APPDB_PASSWORD:?set APPDB_PASSWORD in .env}
+      COHORTSPLIT_WAREHOUSE_DSN: postgresql://cohortsplit_ro:${WAREHOUSE_RO_PASSWORD:?set WAREHOUSE_RO_PASSWORD in .env}@warehouse:5432/ecommerce
+      COHORTSPLIT_LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "127.0.0.1:${APP_PORT:-8000}:8000"
+    depends_on:
+      appdb:
+        condition: service_healthy
+      warehouse:
+        condition: service_healthy
+
+volumes:
+  warehouse-data:
+  appdb-data:
