@@ -9,6 +9,7 @@ from collections.abc import Iterator
 import psycopg
 import pytest
 from psycopg import errors
+from psycopg.conninfo import make_conninfo
 
 pytestmark = pytest.mark.integration
 
@@ -110,3 +111,12 @@ def test_writes_refused_even_after_session_switches_to_read_write(
 
     with pytest.raises(errors.InsufficientPrivilege):
         ro_conn.execute(statement)
+
+
+@pytest.mark.parametrize("dbname", ["postgres", "template1"])
+def test_read_only_role_cannot_connect_to_other_databases(
+    warehouse_ro_dsn: str, dbname: str
+) -> None:
+    """Other databases would allow TEMP objects for PUBLIC; the role must stay in `ecommerce`."""
+    with pytest.raises(psycopg.OperationalError, match="permission denied"):
+        psycopg.connect(make_conninfo(warehouse_ro_dsn, dbname=dbname), connect_timeout=5)
