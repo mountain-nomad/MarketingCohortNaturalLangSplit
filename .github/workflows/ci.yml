@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.12.5"
+  NODE_VERSION: "22.12.0"
+
+jobs:
+  backend:
+    name: Backend lint, typecheck, unit tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Install
+        working-directory: backend
+        run: uv sync --frozen
+      - name: Lint
+        working-directory: backend
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      - name: Typecheck
+        working-directory: backend
+        run: uv run mypy
+      - name: Unit tests
+        working-directory: backend
+        run: uv run pytest -m "not integration"
+
+  frontend:
+    name: Frontend lint, typecheck, tests, build
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  integration:
+    name: Integration tests (docker compose)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Install backend
+        working-directory: backend
+        run: uv sync --frozen
+      - name: Configure (placeholder secrets, CI only)
+        run: cp .env.example .env
+      - name: Start stack and wait until healthy
+        run: make up
+      - name: Integration tests
+        run: make test-integration
+      - name: Compose logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v
