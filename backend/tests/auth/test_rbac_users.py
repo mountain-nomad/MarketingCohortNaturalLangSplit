@@ -60,7 +60,18 @@ def test_admin_lists_users_with_roles(
     assert alice["is_active"] is True
     assert alice["must_change_password"] is False
     assert [r["name"] for r in alice["roles"]] == ["Marketer"]
-    assert "password" not in response.text
+    for user in response.json()["items"]:
+        assert set(user) == {
+            "id",
+            "email",
+            "display_name",
+            "is_active",
+            "must_change_password",
+            "roles",
+            "created_at",
+            "last_login_at",
+        }
+    assert "password_hash" not in response.text
     assert "argon2" not in response.text
 
 
