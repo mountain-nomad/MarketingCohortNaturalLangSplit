@@ -20,7 +20,7 @@ NAMING_CONVENTION = {
 BigId = BigInteger().with_variant(Integer(), "sqlite")
 
 # JSONB in PostgreSQL, JSON elsewhere.
-JsonDocument = JSON().with_variant(JSONB(), "postgresql")
+JsonDocument = JSON().with_variant(JSONB(), "postgresql")  # type: ignore[no-untyped-call]
 
 
 class Base(DeclarativeBase):
