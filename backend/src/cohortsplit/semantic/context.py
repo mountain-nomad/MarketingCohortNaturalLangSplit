@@ -183,15 +183,16 @@ def _normalize_synonyms(values: tuple[str, ...]) -> tuple[str, ...]:
 
 
 Key = Annotated[str, StringConstraints(pattern=KEY_PATTERN)]
+Synonyms = Annotated[
+    tuple[str, ...], Field(max_length=MAX_SYNONYMS), AfterValidator(_normalize_synonyms)
+]
 
 
 class BusinessContextIn(_Model):
     """A business-context entry as submitted by an editor (API body and service input)."""
 
     key: Key
-    synonyms: Annotated[
-        tuple[str, ...], Field(max_length=MAX_SYNONYMS), AfterValidator(_normalize_synonyms)
-    ] = ()
+    synonyms: Synonyms = ()
     description: str = Field(default="", max_length=MAX_DESCRIPTION_LENGTH)
     definition: Definition
 
