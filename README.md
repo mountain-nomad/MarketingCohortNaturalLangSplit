@@ -1,1 +1,1 @@
-# MarketingCohortNaturalLangSplit
+# CohortSplit
