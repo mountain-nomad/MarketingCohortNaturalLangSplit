@@ -12,7 +12,9 @@ from cohortsplit.crawler.catalog import (
     WarehouseCatalog,
 )
 from cohortsplit.crawler.entities import detect_user_table
+from cohortsplit.crawler.errors import CrawlScopeError
 from cohortsplit.crawler.sampling import SamplingPolicy
+from cohortsplit.crawler.vocabulary import KEY_EXAMPLE_TABLES
 from cohortsplit.warehouse.adapter import WarehouseAdapter
 from cohortsplit.warehouse.errors import (
     QueryTimeoutError,
@@ -91,11 +93,23 @@ def _sample_column(
 
 
 def _key_examples(
-    adapter: WarehouseAdapter, policy: SamplingPolicy, meta: TableMetadata
+    adapter: WarehouseAdapter,
+    policy: SamplingPolicy,
+    meta: TableMetadata,
+    user_table: str | None,
 ) -> tuple[str, ...]:
-    if len(meta.primary_key) != 1:
+    """Smallest integer key of a template role table (products, categories) only."""
+    if meta.ref.name.lower() not in KEY_EXAMPLE_TABLES or len(meta.primary_key) != 1:
         return ()
     key = next((c for c in meta.columns if c.name == meta.primary_key[0]), None)
+    references_user = any(
+        key is not None
+        and key.name in fk.columns
+        and f"{fk.referred_schema}.{fk.referred_table}" == user_table
+        for fk in meta.foreign_keys
+    )
+    if references_user:
+        return ()
     if key is None or not policy.decide_key_example(meta.ref, key).allowed:
         return ()
     try:
@@ -112,21 +126,41 @@ def _profile(
     policy: SamplingPolicy,
     meta: TableMetadata,
     *,
-    is_user_table: bool,
+    user_table: str | None,
 ) -> TableProfile:
     columns: list[ColumnProfile] = []
     for column in sorted(meta.columns, key=lambda c: c.ordinal):
         decision = policy.decide(meta.ref, column)
-        if decision.allowed:
-            columns.append(_sample_column(adapter, policy, meta, column.name))
-        else:
+        if not decision.allowed:
             columns.append(ColumnProfile(name=column.name, sampled=False, reason=decision.reason))
+        elif meta.primary_key == (column.name,):
+            reason = "primary key column: identifiers are not sampled"
+            columns.append(ColumnProfile(name=column.name, sampled=False, reason=reason))
+        elif meta.estimated_row_count is None:
+            reason = "row count unknown, so the near-unique check is impossible; not sampled"
+            columns.append(ColumnProfile(name=column.name, sampled=False, reason=reason))
+        else:
+            columns.append(_sample_column(adapter, policy, meta, column.name))
+    is_user_table = meta.ref.qualified_name == user_table
     return TableProfile(
         table=meta.ref.qualified_name,
         estimated_row_count=meta.estimated_row_count,
         columns=tuple(columns),
-        key_examples=() if is_user_table else _key_examples(adapter, policy, meta),
+        key_examples=() if is_user_table else _key_examples(adapter, policy, meta, user_table),
     )
+
+
+def _crawl_schemas(adapter: WarehouseAdapter, schemas: Sequence[str]) -> list[str]:
+    available = adapter.list_schemas()
+    if not schemas:
+        return available
+    missing = sorted(set(schemas) - set(available))
+    if missing:
+        raise CrawlScopeError(
+            f"Configured schema(s) {', '.join(missing)} do not exist or are not usable by the "
+            "warehouse role. Check COHORTSPLIT_CRAWLER_SCHEMAS and the role's USAGE grants."
+        )
+    return sorted(set(schemas))
 
 
 def collect_catalog(
@@ -142,17 +176,23 @@ def collect_catalog(
     ``user_table`` is the configured user entity table ("schema.table"); when ``None``
     it is detected by name. Its key values are never read as examples.
     """
-    crawl_schemas = sorted(set(schemas)) if schemas else adapter.list_schemas()
-    metas = [
-        adapter.describe_table(ref)
-        for schema in crawl_schemas
-        for ref in sorted(adapter.list_tables(schema))
-    ]
+    crawl_schemas = _crawl_schemas(adapter, schemas)
+    refs = {schema: sorted(adapter.list_tables(schema)) for schema in crawl_schemas}
+    # Fail closed: a crawl that sees nothing must never replace previous content.
+    empty = [schema for schema, tables in refs.items() if not tables]
+    if schemas and empty:
+        raise CrawlScopeError(
+            f"Schema(s) {', '.join(empty)} contain no tables readable by the warehouse role. "
+            "Check its SELECT grants and COHORTSPLIT_CRAWLER_SCHEMAS."
+        )
+    if not any(refs.values()):
+        raise CrawlScopeError(
+            "The crawl found no tables readable by the warehouse role. Check its grants "
+            "and COHORTSPLIT_CRAWLER_SCHEMAS."
+        )
+    metas = [adapter.describe_table(ref) for schema in crawl_schemas for ref in refs[schema]]
     docs = tuple(_table_doc(m) for m in metas)
     user = detect_user_table(docs, user_table)
     user_name = user.qualified_name if user is not None else None
-    profiles = tuple(
-        _profile(adapter, policy, meta, is_user_table=meta.ref.qualified_name == user_name)
-        for meta in metas
-    )
+    profiles = tuple(_profile(adapter, policy, meta, user_table=user_name) for meta in metas)
     return WarehouseCatalog(dialect=adapter.dialect, tables=docs, profiles=profiles)

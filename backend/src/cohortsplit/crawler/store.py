@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Connection, Engine, Row, delete, func, select, text, update
+from sqlalchemy import Connection, Engine, Row, delete, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from cohortsplit.cohort_spec.draft import DraftCohortSpec, referenced_columns
@@ -203,7 +203,20 @@ class CrawlStore:
         with self._engine.begin() as conn:
             conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _SWAP_LOCK_KEY})
 
-            conn.execute(delete(semantic_docs).where(semantic_docs.c.origin == "generated"))
+            # A scoped crawl only replaces generated docs of the schemas it crawled.
+            stale_docs = delete(semantic_docs).where(semantic_docs.c.origin == "generated")
+            if scope_schemas is not None:
+                stale_docs = stale_docs.where(
+                    or_(
+                        *(
+                            semantic_docs.c.doc_key.startswith(
+                                table_doc_key(f"{schema}."), autoescape=True
+                            )
+                            for schema in sorted(scope_schemas)
+                        )
+                    )
+                )
+            conn.execute(stale_docs)
             self._insert_docs(conn, run_id, catalog)
 
             preserved = set(

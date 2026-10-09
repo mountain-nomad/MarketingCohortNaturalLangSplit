@@ -5,12 +5,17 @@ read-only transaction, statement timeout and row cap. Identifiers are always
 quoted with :class:`psycopg.sql.Identifier`; values are bound parameters.
 """
 
+import logging
 import re
 from collections.abc import Mapping
 
 from psycopg import sql
 
-from cohortsplit.warehouse.errors import WarehouseQueryError
+from cohortsplit.warehouse.errors import (
+    QueryTimeoutError,
+    WarehousePermissionError,
+    WarehouseQueryError,
+)
 from cohortsplit.warehouse.executor import ReadOnlyExecutor
 from cohortsplit.warehouse.models import (
     ColumnInfo,
@@ -24,7 +29,7 @@ from cohortsplit.warehouse.models import (
 
 _KINDS: dict[str, TableKind] = {
     "r": "table",
-    "p": "table",
+    "p": "partitioned_table",
     "v": "view",
     "m": "materialized_view",
     "f": "foreign_table",
@@ -104,6 +109,16 @@ LEFT JOIN pg_catalog.pg_namespace rn ON rn.oid = rc.relnamespace
 WHERE con.conrelid = %(oid)s::oid AND con.contype IN ('p', 'f', 'c')
 ORDER BY con.conname
 """
+
+_PARTITION_ROWS = """
+SELECT sum(c.reltuples) FILTER (WHERE c.reltuples >= 0)::float8,
+       COALESCE(bool_and(c.reltuples >= 0), false)
+FROM pg_partition_tree(%(oid)s::oid::regclass) t
+JOIN pg_catalog.pg_class c ON c.oid = t.relid
+WHERE t.isleaf
+"""
+
+logger = logging.getLogger(__name__)
 
 _ANY_ARRAY = re.compile(r"=\s*ANY\s*\(\s*\(?\s*ARRAY\[(?P<items>.*)\]", re.DOTALL)
 _LITERAL = re.compile(r"'((?:[^']|'')*)'")
@@ -218,20 +233,32 @@ class PostgresWarehouseAdapter:
             primary_key=primary_key,
             foreign_keys=tuple(foreign_keys),
             estimated_row_count=self._row_count(
-                table, -1 if reltuples is None else _int(reltuples)
+                table, oid, -1 if reltuples is None else _int(reltuples)
             ),
         )
 
-    def _row_count(self, table: TableRef, reltuples: int) -> int | None:
+    def _row_count(self, table: TableRef, oid: object, reltuples: int) -> int | None:
+        """Planner estimate; partitioned tables sum their leaf partitions' estimates.
+        Never-analyzed plain tables get an exact count bounded by the statement timeout;
+        if that count fails the row count is unknown (``None``), never fatal."""
+        if table.kind == "partitioned_table":
+            rows = self._catalog(_PARTITION_ROWS, {"oid": oid}).rows
+            total, all_known = rows[0] if rows else (None, False)
+            return _int(total) if all_known and total is not None else None
         if reltuples >= 0 and table.kind != "view":
             return reltuples
         if table.kind != "table":
             return None
-        # Never analyzed: an exact count, still bounded by the statement timeout.
         query = sql.SQL("SELECT count(*) FROM {}.{}").format(
             sql.Identifier(table.schema), sql.Identifier(table.name)
         )
-        rows = self._executor.execute(query.as_string(), row_cap=1).rows
+        try:
+            rows = self._executor.execute(query.as_string(), row_cap=1).rows
+        except (QueryTimeoutError, WarehousePermissionError, WarehouseQueryError) as exc:
+            logger.warning(
+                "row count failed table=%s error=%s", table.qualified_name, type(exc).__name__
+            )
+            return None
         return _int(rows[0][0])
 
     def get_distinct_values(

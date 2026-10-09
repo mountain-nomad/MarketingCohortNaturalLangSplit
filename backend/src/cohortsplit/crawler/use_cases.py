@@ -30,6 +30,12 @@ from cohortsplit.cohort_spec.draft import (
 )
 from cohortsplit.crawler.catalog import ColumnDoc, TableDoc, WarehouseCatalog
 from cohortsplit.crawler.entities import USER_TABLE_NAMES, detect_user_table
+from cohortsplit.crawler.vocabulary import (
+    CART_TABLES,
+    CATEGORY_TABLES,
+    PRODUCT_TABLES,
+    PURCHASE_TABLES,
+)
 
 UseCaseStatus = Literal["pending_review", "confirmed", "rejected", "needs_rereview"]
 
@@ -60,10 +66,6 @@ class UseCaseGeneration:
 
 # --- template vocabulary -----------------------------------------------------------------
 
-PURCHASE_TABLES = ("orders", "order", "purchases", "purchase", "transactions", "transaction")
-PRODUCT_TABLES = ("products", "product")
-CATEGORY_TABLES = ("categories", "category")
-CART_TABLES = ("carts", "cart", "baskets", "basket")
 LIKE_WORDS = frozenset(
     {"like", "likes", "favorite", "favorites", "favourite", "favourites", "wishlist", "wishlists"}
     | {"reaction", "reactions"}

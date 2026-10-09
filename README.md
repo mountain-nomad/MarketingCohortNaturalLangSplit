@@ -79,7 +79,7 @@ error.
 | `SAMPLING_ENABLED` | `true` | `false` reads no sample values at all |
 | `SAMPLE_MAX_DISTINCT` | `50` | max distinct values for a column to count as low-cardinality |
 | `SAMPLE_DENYLIST` | empty | extra comma-separated column globs never sampled; extends built-in PII defaults (`email`, `phone`, `password*`, `*token*`, `address*`, …) |
-| `SCHEMAS` | empty (all) | comma-separated schemas to crawl |
+| `SCHEMAS` | empty (all) | comma-separated schemas to crawl; a missing schema, or one with no readable tables, fails the crawl and changes nothing |
 | `USER_TABLE` | detected | user entity table as `schema.table` |
 
 In compose, set `CRAWLER_SAMPLING_ENABLED`, `CRAWLER_SAMPLE_DENYLIST` and
@@ -92,6 +92,9 @@ In compose, set `CRAWLER_SAMPLING_ENABLED`, `CRAWLER_SAMPLE_DENYLIST` and
 - Ports are published on `127.0.0.1` only. **TLS termination is the deployer's
   responsibility** (put a TLS-terminating reverse proxy in front of `app`).
 - The warehouse role used by the app is read-only at the database level.
+  Every statement also runs in a READ ONLY transaction with a timeout and row
+  cap. Do not give that role access to `dblink`, `postgres_fdw` or functions
+  with side effects: the role's privileges are the real guarantee.
 
 ## Layout
 

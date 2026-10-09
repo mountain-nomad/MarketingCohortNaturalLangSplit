@@ -11,6 +11,7 @@ from typing import Any
 
 from cohortsplit.crawler.audit import CrawlAuditHook, NullCrawlAuditHook
 from cohortsplit.crawler.catalog import WarehouseCatalog
+from cohortsplit.crawler.errors import CrawlScopeError
 from cohortsplit.crawler.hashing import content_hash
 from cohortsplit.crawler.metadata import collect_catalog
 from cohortsplit.crawler.sampling import ExportGrantProvider, NoExportGrants
@@ -82,11 +83,16 @@ def _summary(
     }
 
 
-def _sanitize(exc: Exception) -> str:
-    """Warehouse errors carry actionable, credential-free messages; anything else is
-    reduced to its type so no unexpected detail is persisted."""
-    if isinstance(exc, WarehouseError):
+_ACTIONABLE = (WarehouseError, CrawlScopeError)
+
+
+def _sanitize(exc: BaseException) -> str:
+    """Warehouse and scope errors carry actionable, credential-free messages; anything
+    else is reduced to its type so no unexpected detail is persisted."""
+    if isinstance(exc, _ACTIONABLE):
         return str(exc)
+    if not isinstance(exc, Exception):
+        return f"crawl interrupted ({type(exc).__name__})"
     return f"internal error ({type(exc).__name__}); see the application logs"
 
 
@@ -128,17 +134,27 @@ def run_crawl(
             summary=_summary(location, settings, catalog, generation),
             scope_schemas=frozenset(settings.schemas) or None,
         )
-    except Exception as exc:
+    except BaseException as exc:
         message = _sanitize(exc)
         logger.error(
             "crawl failed run_id=%s location=%s error=%s",
             run_id,
             location,
             message,
-            exc_info=not isinstance(exc, WarehouseError),
+            exc_info=isinstance(exc, Exception) and not isinstance(exc, _ACTIONABLE),
         )
-        store.mark_run_failed(run_id, message)
+        try:
+            store.mark_run_failed(run_id, message)
+        except Exception as record_exc:
+            # Never let a failure to record the failure hide the crawl error.
+            logger.error(
+                "could not record failed crawl run_id=%s error=%s",
+                run_id,
+                type(record_exc).__name__,
+            )
         audit.crawl_failed(run_id, triggered_by, message)
+        if not isinstance(exc, Exception):
+            raise  # KeyboardInterrupt / SystemExit: recorded as failed, then propagated
         raise CrawlFailedError(
             run_id,
             f"Crawl run {run_id} failed: {message} " "Previous docs and use cases are unchanged.",

@@ -3,7 +3,7 @@
 A deliberately minimal, versioned placeholder so the crawler can store example
 use cases (NL request -> structured spec) before the real cohort specification
 exists. The compiler branch owns the real spec and must migrate stored
-``draft-0`` documents (see docs/decisions/0001-draft-cohort-spec.md).
+``draft-0`` documents (see docs/decisions/0001-warehouse-crawler-rulings.md, R1).
 
 All table references are qualified ``schema.table`` and all column references
 ``schema.table.column``. Values are literals; nothing here is executable SQL.

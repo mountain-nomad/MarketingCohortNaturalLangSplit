@@ -17,19 +17,29 @@ The real cohort specification belongs to `feature/cohort-compiler`. Example use 
 
 ## R2. Export-grant hook
 
-Columns granted for export must never be sampled, but grants arrive with `feature/authentication-rbac`. The crawler takes an `ExportGrantProvider` (`export_granted_columns() -> frozenset[str]`, entries `schema.table.column` or `table.column`) via `run_crawl(..., export_grants=...)`. The default is `NoExportGrants` (empty). The auth branch must pass its grant-backed provider from the CLI/service that triggers crawls.
+Columns granted for export must never be sampled, but grants arrive with `feature/authentication-rbac`. The crawler takes an `ExportGrantProvider` (`export_granted_columns() -> frozenset[str]`, entries `schema.table.column` or `table.column`) via `run_crawl(..., export_grants=...)`. The default is `NoExportGrants` (empty). The auth branch must pass its grant-backed provider from the CLI/service that triggers crawls. Samples stored before a grant was added stay in `data_profile` until the next crawl, so the auth branch should trigger a re-crawl (or purge that column's samples) whenever an export grant is added.
 
 ## R3. Sampling policy
 
 - Only categorical types (string, boolean, enum) are sampled; numbers, dates, JSON, etc. never are.
 - The default denylist (`email`, `phone`, `password*`, `*token*`, `address*`, plus `*email*`, `*phone*`, `*password*`, `*secret*`, `*_hash`, `first_name`, `last_name`, `*line1`, `*line2`, `*postal_code*`, `ship_name`) always applies. `COHORTSPLIT_CRAWLER_SAMPLE_DENYLIST` **extends** it and cannot remove entries.
 - "Low-cardinality" means at most `COHORTSPLIT_CRAWLER_SAMPLE_MAX_DISTINCT` (default 50) distinct non-null values **and** no more distinct values than half the rows (near-unique values in small tables look like identifiers, e.g. names). Values that fail the second rule are read but discarded, never stored.
+- Primary-key columns are never sampled (identifiers, not categories).
+- Columns of relations with an unknown row count (views, failed counts) are not sampled, because the near-unique check is impossible.
 - `COHORTSPLIT_CRAWLER_SAMPLING_ENABLED=false` disables every value read (samples and key examples).
 - Each column's profile records why it was or was not sampled, for reviewers.
 
 ## R4. Key examples for use-case values
 
-Templates such as "bought product X" need a real value for X, and product names are usually high-cardinality. The crawler reads the smallest primary-key value (one value) of single-key tables, subject to the same policy (denylist, export grants, sampling switch). It never does this for the user entity table, so no user IDs are stored. If no permitted value exists, the template is dropped with a reason.
+Templates such as "bought product X" need a real value for X, and product names are usually high-cardinality. Reading a key is an explicit, narrow deviation from "samples only for low-cardinality columns":
+
+- one value only: the smallest key;
+- only from the template role tables (`products`/`product`, `categories`/`category`);
+- only for single-column **integer** primary keys, so never codes, UUIDs or string keys;
+- never from the user entity table, and never when the key is also a foreign key to it;
+- subject to the same policy as samples (denylist, export grants, sampling switch).
+
+If no permitted value exists, the template is dropped with a reason.
 
 ## R5. Template vocabulary, not customer schema
 
@@ -40,7 +50,9 @@ Templates recognise roles by generic names (`orders`/`purchases`/`transactions`,
 - Generated use cases are keyed by template key (one use case per template per crawl).
 - Pending generated use cases are replaced. Confirmed, rejected or flagged generated use cases are kept, and their key is not regenerated, so a rejected suggestion does not come back.
 - Human use cases and human docs are never modified, except that a **confirmed** use case of any origin whose referenced table/column is gone becomes `needs_rereview` with a `review_note`. Its spec is not changed.
-- Flagging only considers references inside the crawled schemas when `COHORTSPLIT_CRAWLER_SCHEMAS` limits the crawl.
+- Flagging only considers references inside the crawled schemas when `COHORTSPLIT_CRAWLER_SCHEMAS` limits the crawl. Deleting generated docs follows the same scope: a scoped crawl replaces only the docs of the schemas it crawled. Pending generated use cases are always replaced, because template keys are global.
+- Fail closed against misconfiguration: if a configured schema is missing or not usable, or the role can read no tables in it (or none at all), the crawl fails before anything is stored. Revoking SELECT on *some* tables still looks like those tables disappearing. Detecting that would need privilege-independent catalog reads, which is left as an open item.
+- Known limits, deferred: flagging checks only that tables/columns exist, not changed types or dropped FKs; concurrent crawls are serialized but not ordered, so the run that finishes last wins.
 - Pending human use cases are not flagged: they are already awaiting review.
 - Editing a generated use case (semantic-context branch) should set `origin = 'human'` so that later crawls leave it alone.
 

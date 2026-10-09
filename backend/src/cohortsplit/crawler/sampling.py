@@ -32,10 +32,24 @@ DEFAULT_SAMPLE_DENYLIST: tuple[str, ...] = (
     "*line2",
     "*postal_code*",
     "ship_name",
+    "full_name",
+    "*username*",
+    "*user_name*",
+    "*ssn*",
+    "*birth*",
+    "dob",
+    "*_dob",
+    "*ip_address*",
+    "*passport*",
+    "*iban*",
+    "*card_number*",
+    "*card_no*",
+    "*tax_id*",
 )
 
 SAMPLEABLE_CATEGORIES: frozenset[TypeCategory] = frozenset({"string", "boolean", "enum"})
-KEY_EXAMPLE_CATEGORIES: frozenset[TypeCategory] = frozenset({"numeric", "string"})
+# Key examples: integer surrogate keys only (never codes, UUIDs or other string keys).
+KEY_EXAMPLE_TYPES: frozenset[str] = frozenset({"smallint", "integer", "bigint"})
 
 
 @dataclass(frozen=True)
@@ -126,8 +140,6 @@ class SamplingPolicy:
         denied = self._common(table, column)
         if denied is not None:
             return denied
-        if column.type_category not in KEY_EXAMPLE_CATEGORIES:
-            return SamplingDecision(
-                False, f"type not used for key examples ({column.type_category})"
-            )
+        if column.type_category != "numeric" or column.data_type not in KEY_EXAMPLE_TYPES:
+            return SamplingDecision(False, f"not an integer key ({column.data_type})")
         return SamplingDecision(True, "key example")
