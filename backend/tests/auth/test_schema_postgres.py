@@ -128,7 +128,16 @@ def test_orm_models_match_the_migration(pg: Connection) -> None:
     import cohortsplit.audit.models
     import cohortsplit.auth.models  # noqa: F401  (register tables on Base.metadata)
 
-    context = MigrationContext.configure(pg, opts={"compare_type": True})
+    owned = set(Base.metadata.tables)
+
+    def include_object(obj, name, type_, reflected, compare_to):  # type: ignore[no-untyped-def]
+        # Other features (e.g. the crawler) own their tables with their own MetaData.
+        table = obj if type_ == "table" else getattr(obj, "table", None)
+        return table is None or table.name in owned
+
+    context = MigrationContext.configure(
+        pg, opts={"compare_type": True, "include_object": include_object}
+    )
     diff = compare_metadata(context, Base.metadata)
 
     # Expression indexes (lower(name)) cannot be compared by autogenerate; ignore those.

@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     # Read-only warehouse connection (libpq URL, password URL-encoded). Optional until
     # the warehouse adapter lands; never logged.
     warehouse_dsn: SecretStr | None = None
+    # Limits enforced by the read-only warehouse executor (FR-6).
+    warehouse_statement_timeout_seconds: float = Field(default=30.0, gt=0)
+    warehouse_row_cap: int = Field(default=1_000_000, ge=1)
+    warehouse_connect_timeout_seconds: int = Field(default=5, ge=1)
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     # Directory with the built frontend (index.html); when unset, no UI is served.

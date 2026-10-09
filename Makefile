@@ -24,8 +24,11 @@ $(HOST_ENV_TARGETS): export COHORTSPLIT_APPDB_USER := $(APPDB_USER)
 $(HOST_ENV_TARGETS): export COHORTSPLIT_APPDB_PASSWORD := $(APPDB_PASSWORD)
 $(HOST_ENV_TARGETS): export COHORTSPLIT_WAREHOUSE_DSN := postgresql://cohortsplit_ro:$(WAREHOUSE_RO_PASSWORD)@127.0.0.1:$(WAREHOUSE_PORT)/ecommerce
 test-integration: export COHORTSPLIT_REQUIRE_INTEGRATION := 1
+# TEST-ONLY admin DSN: integration tests create throwaway scratch schemas with it.
+# The application itself only ever uses the read-only role.
+test-integration: export COHORTSPLIT_TEST_WAREHOUSE_ADMIN_DSN := postgresql://warehouse_admin:$(WAREHOUSE_ADMIN_PASSWORD)@127.0.0.1:$(WAREHOUSE_PORT)/ecommerce
 
-.PHONY: help install lint typecheck test test-backend test-frontend test-integration up down migrate
+.PHONY: help install lint typecheck test test-backend test-frontend test-integration up down migrate crawl
 
 help:
 	@echo "install           install backend (uv) and frontend (npm) dependencies"
@@ -35,6 +38,7 @@ help:
 	@echo "test-integration  backend integration tests against running compose DBs (make up)"
 	@echo "up / down         start (and wait until healthy) / stop the docker compose stack"
 	@echo "migrate           alembic upgrade head against the compose appdb"
+	@echo "crawl             run the metadata crawler inside the app container"
 
 install:
 	cd backend && $(UV) sync --frozen
@@ -67,3 +71,6 @@ down:
 
 migrate:
 	cd backend && $(UV) run alembic upgrade head
+
+crawl:
+	$(COMPOSE) exec app cohortsplit crawl

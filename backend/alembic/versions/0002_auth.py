@@ -1,8 +1,12 @@
 """Authentication, RBAC, export-column grants, sessions, login throttling, audit log.
 
 Revision ID: 0002_auth
-Revises: 0001_baseline
+Revises: 0003_warehouse_metadata
 Create Date: 2026-10-09
+
+Re-chained after 0003_warehouse_metadata when feature/warehouse-crawler merged first;
+the revision id keeps its original name (ids are opaque; renaming would break
+databases already stamped 0002_auth during development).
 
 Seeds the permission catalog (FR-A3) and the protected Admin system role. Admin holds
 every permission implicitly (no role_permissions rows), including future ones.
@@ -16,7 +20,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "0002_auth"
-down_revision: str | None = "0001_baseline"
+down_revision: str | None = "0003_warehouse_metadata"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
