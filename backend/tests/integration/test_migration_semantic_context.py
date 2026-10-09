@@ -1,4 +1,4 @@
-"""Migration 0004_semantic_context: single head, tables and columns, constraints, clean downgrade."""
+"""Migration 0004_semantic_context: single head, tables, constraints, clean downgrade."""
 
 from collections.abc import Iterator
 
@@ -55,8 +55,8 @@ def test_single_head_is_the_semantic_context_revision(cfg: Config) -> None:
 
 def test_upgrade_creates_and_downgrade_removes(cfg: Config, appdb: Engine) -> None:
     command.upgrade(cfg, REVISION)
-    assert TABLES <= _tables(appdb)
-    assert REVIEW_COLUMNS <= _use_case_columns(appdb)
+    assert _tables(appdb) >= TABLES
+    assert _use_case_columns(appdb) >= REVIEW_COLUMNS
 
     command.downgrade(cfg, "0002_auth")
     assert not TABLES & _tables(appdb)
@@ -64,7 +64,7 @@ def test_upgrade_creates_and_downgrade_removes(cfg: Config, appdb: Engine) -> No
 
     command.downgrade(cfg, "base")
     command.upgrade(cfg, "head")
-    assert TABLES <= _tables(appdb)
+    assert _tables(appdb) >= TABLES
 
 
 @pytest.mark.parametrize(
