@@ -14,6 +14,11 @@ from sqlalchemy.engine import URL
 
 from tests.auth.conftest import *  # noqa: F403  (shared auth fixtures)
 from tests.auth.conftest import _PG_CLEANUP
+from tests.integration.conftest import (  # noqa: F401  (warehouse fixtures for crawl tests)
+    scratch,
+    warehouse_admin_dsn,
+    warehouse_ro_dsn,
+)
 
 SEMANTIC_TABLES = (
     "business_context_entries",

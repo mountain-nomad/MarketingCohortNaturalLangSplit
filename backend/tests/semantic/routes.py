@@ -16,4 +16,6 @@ SEMANTIC_GATED: dict[tuple[str, str], str] = {
     ("PUT", "/api/semantic/use-cases/{use_case_id}"): "use_case.review",
     ("GET", "/api/semantic/version"): "semantic_context.read",
     ("GET", "/api/semantic/versions"): "semantic_context.read",
+    ("POST", "/api/crawler/runs"): "crawler.run",
+    ("GET", "/api/crawler/runs"): "semantic_context.read",
 }
