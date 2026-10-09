@@ -2,17 +2,21 @@
 
 from collections.abc import Iterable
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Annotated, Any
 
 import httpx
-from fastapi import FastAPI
+from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.testclient import TestClient
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from cohortsplit.auth import passwords
 from cohortsplit.auth.catalog import ADMIN_ROLE_NAME, PERMISSION_CATALOG
+from cohortsplit.auth.clock import Clock, get_clock
+from cohortsplit.auth.dependencies import DbSession, get_policy, get_request_id, require_permission
 from cohortsplit.auth.models import Permission, Role, RoleExportColumn, RolePermission, User
+from cohortsplit.auth.policy import PolicyService, Principal
 
 STRONG_PASSWORD = "correct horse battery staple"
 OTHER_PASSWORD = "another long passphrase 42"
@@ -141,3 +145,47 @@ def error_code(response: httpx.Response) -> str | None:
         code = body["error"].get("code")
         return code if isinstance(code, str) else None
     return None
+
+
+EXPORT_TEST_PATH = "/api/test-only/exports"
+
+
+class ExportIn(BaseModel):
+    run_id: str
+    columns: list[str] = []
+    redownload: bool = False
+
+
+def export_test_router() -> APIRouter:
+    """Stand-in for the future export endpoint (feature experiment-split).
+
+    Built only from the public interfaces later features must use:
+    ``require_permission("cohort.export")`` and ``PolicyService.authorize_export``.
+    """
+    router = APIRouter()
+
+    @router.post(EXPORT_TEST_PATH)
+    def export(
+        body: ExportIn,
+        request: Request,
+        principal: Annotated[Principal, Depends(require_permission("cohort.export"))],
+        db: DbSession,
+        policy: Annotated[PolicyService, Depends(get_policy)],
+        clock: Annotated[Clock, Depends(get_clock)],
+    ) -> dict[str, object]:
+        allowed = policy.authorize_export(
+            db,
+            principal,
+            columns=body.columns,
+            run_id=body.run_id,
+            redownload=body.redownload,
+            row_counts={"test": 3, "control": 2},
+            request_id=get_request_id(request),
+            now=clock(),
+        )
+        return {
+            "canonical_user_id": allowed.canonical_user_id,
+            "columns": sorted(c for c in body.columns if allowed.allows(c)),
+        }
+
+    return router

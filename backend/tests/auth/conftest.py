@@ -30,11 +30,15 @@ from cohortsplit.app import create_app
 from cohortsplit.audit.models import AuditEvent
 from cohortsplit.auth import passwords
 from cohortsplit.auth.clock import get_clock
+from cohortsplit.auth.models import User
 from cohortsplit.config import ConfigError, Settings, load_settings
 from cohortsplit.db import appdb_url
 from cohortsplit.orm import Base
 from tests.auth.helpers import (
+    ApiClient,
     FakeClock,
+    admin_role,
+    make_user,
     seed_reference_data,
 )
 
@@ -207,3 +211,29 @@ class AuditReader:
 
     def of(self, action: str) -> list[AuditEvent]:
         return [e for e in self.all() if e.action == action]
+
+
+@pytest.fixture
+def admin_user(db: Session, clock: FakeClock) -> User:
+    return make_user(
+        db, "root@example.com", now=clock.now, roles=[admin_role(db)], display_name="Root"
+    )
+
+
+@pytest.fixture
+def admin_client(app: FastAPI, admin_user: User) -> ApiClient:
+    client = ApiClient(app)
+    assert client.login("root@example.com").status_code == 200
+    return client
+
+
+@pytest.fixture
+def audit_store_down(engine: Engine) -> Iterator[None]:
+    """Make every audit insert fail (the table is renamed away), then restore it."""
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE audit_events RENAME TO audit_events_offline"))
+    try:
+        yield
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE audit_events_offline RENAME TO audit_events"))

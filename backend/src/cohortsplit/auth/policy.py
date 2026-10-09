@@ -6,7 +6,9 @@ Client-supplied roles, permissions or user ids are never consulted. Future data 
 export-column grants, without changing endpoint code.
 """
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -37,6 +39,17 @@ class Principal:
         return permission in self.permissions
 
 
+@dataclass(frozen=True)
+class ExportColumnPolicy:
+    """Which columns the principal may export (BR-A3)."""
+
+    canonical_user_id: bool
+    granted_columns: frozenset[str]
+
+    def allows(self, column: str) -> bool:
+        return self.canonical_user_id and column in self.granted_columns
+
+
 class PolicyService:
     def roles_of(self, db: Session, user_id: int) -> list[Role]:
         return list(
@@ -64,6 +77,23 @@ class PolicyService:
 
     def effective_permissions(self, db: Session, user_id: int) -> frozenset[str]:
         return self.permissions_for_roles(db, self.roles_of(db, user_id))
+
+    def effective_export_columns(self, db: Session, principal: Principal) -> "ExportColumnPolicy":
+        raise NotImplementedError
+
+    def authorize_export(
+        self,
+        db: Session,
+        principal: Principal,
+        *,
+        columns: Sequence[str],
+        run_id: str | None,
+        redownload: bool,
+        row_counts: Mapping[str, int] | None,
+        request_id: str | None,
+        now: datetime,
+    ) -> "ExportColumnPolicy":
+        raise NotImplementedError
 
     def principal_for(self, db: Session, user: User, session_id: int) -> Principal:
         roles = self.roles_of(db, user.id)
