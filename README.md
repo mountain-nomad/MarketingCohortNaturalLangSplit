@@ -33,6 +33,7 @@ at `/api/docs`). `make down` stops the stack (data volumes are kept; use
 | `make test-integration` | integration tests; fail if the stack is not reachable |
 | `make up` / `make down` | start (wait for healthy) / stop docker compose |
 | `make migrate` | `alembic upgrade head` against the compose appdb |
+| `make crawl` | run the metadata crawler in the app container |
 
 ## Services
 
@@ -48,6 +49,42 @@ The backend reads `COHORTSPLIT_*` environment variables (see
 `backend/src/cohortsplit/config.py`); `COHORTSPLIT_APPDB_PASSWORD` is required and
 startup fails with a message naming any missing or invalid variable. Passwords and
 the warehouse DSN are secret values that are never logged or rendered.
+
+Warehouse limits: `COHORTSPLIT_WAREHOUSE_STATEMENT_TIMEOUT_SECONDS` (default 30),
+`COHORTSPLIT_WAREHOUSE_ROW_CAP` (default 1,000,000),
+`COHORTSPLIT_WAREHOUSE_CONNECT_TIMEOUT_SECONDS` (default 5). Every warehouse
+statement runs in its own read-only transaction.
+
+## Metadata crawler
+
+```bash
+make crawl                                   # inside the app container
+docker compose exec app cohortsplit crawl --json
+```
+
+The crawler connects as the read-only role. It documents schemas, tables/views,
+columns, types, primary and foreign keys, comments, CHECK value lists and row
+counts. It also generates example use cases (NL request → `draft-0` spec) from
+deterministic templates. Templates the data cannot support are rewritten (e.g.
+"liked product X" → "bought product X") or dropped, with the reason recorded.
+All output is stored in appdb as generated content with status
+**pending review**. A re-run replaces only generated content: human-authored
+docs and reviewed use cases are kept, and confirmed use cases whose tables or
+columns disappeared are flagged `needs_rereview`. A failed crawl leaves the
+previous content intact. Exit codes: 0 ok, 1 crawl failed, 2 configuration
+error.
+
+| Variable (`COHORTSPLIT_CRAWLER_*`) | Default | Meaning |
+|---|---|---|
+| `SAMPLING_ENABLED` | `true` | `false` reads no sample values at all |
+| `SAMPLE_MAX_DISTINCT` | `50` | max distinct values for a column to count as low-cardinality |
+| `SAMPLE_DENYLIST` | empty | extra comma-separated column globs never sampled; extends built-in PII defaults (`email`, `phone`, `password*`, `*token*`, `address*`, …) |
+| `SCHEMAS` | empty (all) | comma-separated schemas to crawl |
+| `USER_TABLE` | detected | user entity table as `schema.table` |
+
+In compose, set `CRAWLER_SAMPLING_ENABLED`, `CRAWLER_SAMPLE_DENYLIST` and
+`CRAWLER_SCHEMAS` in `.env`. The rulings behind these defaults are in
+[`docs/decisions/0001-warehouse-crawler-rulings.md`](docs/decisions/0001-warehouse-crawler-rulings.md).
 
 ## Security notes
 
