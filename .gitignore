@@ -1,0 +1,9 @@
+
+# COHORT_PLATFORM_LOCAL_SECRETS
+.env
+.env.*
+!.env.example
+.secrets/
+*.pem
+*.key
+# END_COHORT_PLATFORM_LOCAL_SECRETS
