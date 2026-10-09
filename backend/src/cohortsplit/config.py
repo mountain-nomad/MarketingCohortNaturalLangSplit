@@ -41,6 +41,13 @@ class Settings(BaseSettings):
             raise ValueError("must not be empty")
         return value
 
+    @field_validator("frontend_dist")
+    @classmethod
+    def _dist_has_index(cls, value: Path | None) -> Path | None:
+        if value is not None and not (value / "index.html").is_file():
+            raise ValueError("must be a directory containing index.html")
+        return value
+
     @field_validator("warehouse_dsn", mode="before")
     @classmethod
     def _empty_dsn_is_unset(cls, value: object) -> object:
