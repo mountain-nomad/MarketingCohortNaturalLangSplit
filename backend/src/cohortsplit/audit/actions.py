@@ -28,3 +28,6 @@ COHORT_REDOWNLOAD = "cohort.redownload"
 
 # Authorization denials on permission-gated endpoints
 ACCESS_DENIED = "access.denied"
+
+# Warehouse crawler runs (feature/warehouse-crawler, via AuditCrawlHook)
+CRAWLER_RUN = "crawler.run"

@@ -242,7 +242,7 @@ def test_crawl_cli_passes_grants_and_audit_hook(
         seen["grants"] = export_grants.export_granted_columns()
         audit.crawl_started(5, triggered_by)
         audit.crawl_failed(5, triggered_by, "boom")
-        raise CrawlFailedError("boom")
+        raise CrawlFailedError(5, "boom")
 
     clean_env.setattr(crawl_cli, "run_crawl", fake_run_crawl)
 

@@ -20,6 +20,7 @@ from cohortsplit.audit import actions
 from cohortsplit.audit.service import Actor, AuditEventIn, AuditService
 from cohortsplit.auth.catalog import ALL_PERMISSIONS
 from cohortsplit.auth.clock import Clock, get_clock
+from cohortsplit.auth.crawler_integration import ColumnInventory
 from cohortsplit.auth.errors import (
     CsrfError,
     NotAuthenticatedError,
@@ -47,6 +48,8 @@ class AuthState:
     audit: AuditService
     policy: PolicyService
     auth: AuthService
+    # Crawled-column inventory for "missing" grant marks (cohortsplit.auth.crawler_integration).
+    column_inventory: ColumnInventory | None = None
 
 
 def _state(request: Request) -> AuthState:

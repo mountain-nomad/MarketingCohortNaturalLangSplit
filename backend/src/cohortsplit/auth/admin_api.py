@@ -1,7 +1,7 @@
 """Admin endpoints: users, roles, permission catalog. Each endpoint names its permission."""
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field, SecretStr
@@ -13,6 +13,7 @@ from cohortsplit.auth import user_admin
 from cohortsplit.auth.catalog import PERMISSION_CATALOG
 from cohortsplit.auth.changes import ChangeContext
 from cohortsplit.auth.clock import Clock, get_clock
+from cohortsplit.auth.crawler_integration import ColumnInventory, get_column_inventory
 from cohortsplit.auth.dependencies import (
     DbSession,
     ensure_permission,
@@ -51,6 +52,7 @@ def _ctx(
 
 Audit = Annotated[AuditService, Depends(get_audit)]
 Now = Annotated[Clock, Depends(get_clock)]
+Inventory = Annotated[ColumnInventory, Depends(get_column_inventory)]
 
 
 # --- schemas ------------------------------------------------------------------------------
@@ -112,9 +114,10 @@ class RoleOut(BaseModel):
     description: str
     is_system: bool
     permissions: list[str]
-    # TODO(feature/warehouse-crawler): add per-column status (present/missing) once the
-    # crawler's column inventory exists; grants are validated by format only for now.
     export_columns: list[str]
+    # Grants on columns absent from the latest crawl (inert); empty when no crawl exists.
+    missing_export_columns: list[str]
+    column_inventory: Literal["available", "unavailable"]
     member_ids: list[int]
 
 
@@ -153,14 +156,17 @@ def user_out(db: Session, user: User) -> UserOut:
     )
 
 
-def role_out(db: Session, role: Role) -> RoleOut:
+def role_out(db: Session, role: Role, crawled: frozenset[str] | None) -> RoleOut:
+    columns = role_service.export_columns_of(db, role)
     return RoleOut(
         id=role.id,
         name=role.name,
         description=role.description,
         is_system=role.is_system,
         permissions=role_service.permissions_of(db, role),
-        export_columns=role_service.export_columns_of(db, role),
+        export_columns=columns,
+        missing_export_columns=[] if crawled is None else [c for c in columns if c not in crawled],
+        column_inventory="unavailable" if crawled is None else "available",
         member_ids=role_service.member_ids_of(db, role),
     )
 
@@ -300,9 +306,10 @@ def list_permissions(_: RoleRead) -> PermissionListOut:
 
 
 @router.get("/roles", response_model=RoleListOut)
-def list_roles(_: RoleRead, db: DbSession) -> RoleListOut:
+def list_roles(_: RoleRead, db: DbSession, inventory: Inventory) -> RoleListOut:
     roles = db.query(Role).order_by(Role.is_system.desc(), Role.name).all()
-    return RoleListOut(items=[role_out(db, r) for r in roles])
+    crawled = inventory.columns()
+    return RoleListOut(items=[role_out(db, r, crawled) for r in roles])
 
 
 @router.post("/roles", response_model=RoleOut, status_code=201)
@@ -313,6 +320,7 @@ def create_role(
     db: DbSession,
     audit: Audit,
     clock: Now,
+    inventory: Inventory,
 ) -> RoleOut:
     role = role_service.create_role(
         db,
@@ -323,12 +331,12 @@ def create_role(
         export_columns=body.export_columns,
     )
     db.commit()
-    return role_out(db, role)
+    return role_out(db, role, inventory.columns())
 
 
 @router.get("/roles/{role_id}", response_model=RoleOut)
-def get_role(role_id: int, _: RoleRead, db: DbSession) -> RoleOut:
-    return role_out(db, role_service.get_role(db, role_id))
+def get_role(role_id: int, _: RoleRead, db: DbSession, inventory: Inventory) -> RoleOut:
+    return role_out(db, role_service.get_role(db, role_id), inventory.columns())
 
 
 @router.patch("/roles/{role_id}", response_model=RoleOut)
@@ -340,6 +348,7 @@ def update_role(
     db: DbSession,
     audit: Audit,
     clock: Now,
+    inventory: Inventory,
 ) -> RoleOut:
     role = role_service.get_role(db, role_id)
     role_service.update_role(
@@ -352,7 +361,7 @@ def update_role(
         export_columns=body.export_columns,
     )
     db.commit()
-    return role_out(db, role)
+    return role_out(db, role, inventory.columns())
 
 
 @router.delete("/roles/{role_id}", status_code=204, response_class=Response)
@@ -380,8 +389,9 @@ def set_role_members(
     db: DbSession,
     audit: Audit,
     clock: Now,
+    inventory: Inventory,
 ) -> RoleOut:
     role = role_service.get_role(db, role_id)
     role_service.set_members(db, _ctx(request, principal, audit, clock), role, body.user_ids)
     db.commit()
-    return role_out(db, role)
+    return role_out(db, role, inventory.columns())

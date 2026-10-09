@@ -11,7 +11,10 @@ import sys
 from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import sessionmaker
 
+from cohortsplit.audit.service import Actor, AuditService
+from cohortsplit.auth.crawler_integration import AuditCrawlHook, RoleExportGrants
 from cohortsplit.config import ConfigError, load_settings
 from cohortsplit.crawler.service import CrawlFailedError, CrawlReport, run_crawl
 from cohortsplit.crawler.settings import load_crawler_settings
@@ -108,9 +111,16 @@ def run(args: argparse.Namespace) -> int:
     _configure_logging(settings.log_level)
 
     engine = create_appdb_engine(settings)
+    session_factory = sessionmaker(engine, expire_on_commit=False)
     try:
         report = run_crawl(
-            adapter, CrawlStore(engine), settings=crawler_settings, triggered_by="cli"
+            adapter,
+            CrawlStore(engine),
+            settings=crawler_settings,
+            # Export-granted columns are never sampled (ruling R2); runs are audited (FR-A5).
+            export_grants=RoleExportGrants(session_factory),
+            audit=AuditCrawlHook(AuditService(session_factory), Actor.cli()),
+            triggered_by="cli",
         )
     except CrawlFailedError as exc:
         print(f"crawl failed: {exc}", file=sys.stderr)

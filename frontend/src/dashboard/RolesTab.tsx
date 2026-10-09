@@ -151,6 +151,12 @@ function RoleEditor({
           onChange={(e) => setValue({ ...value, columns: e.target.value })}
         />
       </label>
+      {original && (original.missing_export_columns?.length ?? 0) > 0 && (
+        <p className="warning">
+          Not found in the latest crawl: {original.missing_export_columns?.join(', ')}. These grants
+          stay inert until the column exists again.
+        </p>
+      )}
       <small id="columns-hint" className="muted hint">
         One <code>schema.table.column</code> per line. The user ID is always exportable with
         cohort.export.
@@ -287,8 +293,19 @@ export function RolesTab() {
               <p className="role-meta">
                 {role.is_system ? 'Every permission' : `${role.permissions.length} permission(s)`} ·{' '}
                 {role.member_ids.length} member(s)
-                {role.export_columns.length > 0 && <> · exports {role.export_columns.join(', ')}</>}
               </p>
+              {role.export_columns.length > 0 && (
+                <ul className="chips export-columns" aria-label={`Exportable columns of ${role.name}`}>
+                  {role.export_columns.map((column) => (
+                    <li
+                      key={column}
+                      className={role.missing_export_columns?.includes(column) ? 'missing' : undefined}
+                    >
+                      {role.missing_export_columns?.includes(column) ? `${column} (missing)` : column}
+                    </li>
+                  ))}
+                </ul>
+              )}
               {!role.is_system && (
                 <div className="actions">
                   <button

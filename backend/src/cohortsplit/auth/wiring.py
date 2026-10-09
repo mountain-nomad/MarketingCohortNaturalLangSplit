@@ -19,11 +19,13 @@ from cohortsplit.audit import api as audit_api
 from cohortsplit.audit.service import AuditService, AuditWriteError
 from cohortsplit.auth import admin_api
 from cohortsplit.auth import api as auth_api
+from cohortsplit.auth.crawler_integration import CrawlStoreColumnInventory
 from cohortsplit.auth.dependencies import AuthState, CurrentPrincipal
 from cohortsplit.auth.errors import ApiError, ServiceUnavailableError
 from cohortsplit.auth.policy import PolicyService
 from cohortsplit.auth.service import AuthService
 from cohortsplit.config import Settings
+from cohortsplit.crawler.store import CrawlStore
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +99,7 @@ def install_auth(app: FastAPI, settings: Settings, engine: Engine) -> None:
         audit=audit,
         policy=PolicyService(audit),
         auth=AuthService(settings, audit),
+        column_inventory=CrawlStoreColumnInventory(CrawlStore(engine)),
     )
 
     app.add_exception_handler(ApiError, _api_error_handler)

@@ -30,6 +30,9 @@ export interface Role {
   is_system: boolean
   permissions: string[]
   export_columns: string[]
+  /** Grants on columns absent from the latest crawl (inert until the column exists). */
+  missing_export_columns?: string[]
+  column_inventory?: 'available' | 'unavailable'
   member_ids: number[]
 }
 

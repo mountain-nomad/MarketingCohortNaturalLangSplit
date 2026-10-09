@@ -31,7 +31,7 @@ Frontend (`frontend/src/`): API client with CSRF header, auth context, login pag
 - SSO/OIDC/SAML, MFA, self-signup, invitations, email password reset (spec non-goals).
 - RLS, table grants, deny rules, PII classification (FR-A8 only requires the policy layer they will attach to).
 - Cohort runs, exports, re-downloads, semantic context, crawler (later features). This branch delivers the **export authorization gate** they must call; there is no export endpoint yet.
-- "Missing column" marking of grants: needs the crawler's column inventory (`feature/warehouse-crawler`). **TODO** recorded here: once the crawler lands, `RoleOut.export_columns` gains a `status` (`present`/`missing`) computed against discovered columns, and the role editor offers discovered columns. Until then grants are validated by format only.
+- Export endpoints themselves (feature `experiment-split`).
 - Audit export/retention policies.
 
 ## Proposed interfaces
@@ -228,6 +228,9 @@ Admin removes Admin from themselves while another active admin exists → allowe
 7. Audit reader responses include the actor's email (identity is the point of an audit trail; `audit.read` is an explicit grant).
 8. Denied permission checks are audited (`access.denied`, best effort).
 9. Admin role membership changes only through the Users screen/API or CLI (`PUT /roles/{id}/members` refuses the system role).
+10. Migration id `0002_auth` is kept after re-chaining it onto `0003_warehouse_metadata` (single head `0002_auth`); ids are opaque and renaming would orphan development databases stamped with it. Development databases migrated before the merge must be reset (`docker compose down -v`).
+11. "Missing" export grants (FR-A4): a grant is missing when its column is absent from the generated `table_schema` docs of the crawler (the latest state of every crawled schema). Before any crawl the status is `unavailable` and nothing is marked. Missing grants can still be saved (prepared for a future column) and stay inert.
+12. Crawler hooks: `cohortsplit crawl` passes `RoleExportGrants` (union of every role's grants, assigned or not) and `AuditCrawlHook` (one `crawler.run` event per run, non-sensitive). Samples stored before a grant was added are not purged on grant changes; they disappear at the next crawl. Re-crawl after adding a grant (open concern; an automatic purge is follow-up work).
 
 ## Acceptance criteria
 
