@@ -7,3 +7,21 @@
 *.pem
 *.key
 # END_COHORT_PLATFORM_LOCAL_SECRETS
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+coverage/
+
+# Tooling
+.superpowers/
+.DS_Store
