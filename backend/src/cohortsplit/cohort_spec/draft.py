@@ -131,11 +131,33 @@ Not.model_rebuild()
 DraftCohortSpec.model_rebuild()
 
 
+def _condition_columns(condition: Condition) -> set[str]:
+    match condition:
+        case AttributeCondition(filter=value_filter):
+            return {value_filter.column}
+        case AttributeTimeWindowCondition(window=window):
+            return {window.column}
+        case RelatedCondition():
+            columns = {c for join in condition.path for c in (join.from_column, join.to_column)}
+            columns |= {f.column for f in condition.filters}
+            if condition.time_window is not None:
+                columns.add(condition.time_window.column)
+            if condition.aggregate is not None and condition.aggregate.column is not None:
+                columns.add(condition.aggregate.column)
+            return columns
+        case AllOf(conditions=children) | AnyOf(conditions=children):
+            return {c for child in children for c in _condition_columns(child)}
+        case Not(condition=child):
+            return _condition_columns(child)
+    raise TypeError(f"unknown condition {type(condition).__name__}")  # pragma: no cover
+
+
 def referenced_columns(spec: DraftCohortSpec) -> frozenset[str]:
     """Every qualified column the spec depends on, including the entity key."""
-    raise NotImplementedError
+    entity_key = f"{spec.entity.table}.{spec.entity.key}"
+    return frozenset({entity_key, *_condition_columns(spec.where)})
 
 
 def referenced_tables(spec: DraftCohortSpec) -> frozenset[str]:
     """Every qualified table the spec depends on."""
-    raise NotImplementedError
+    return frozenset({spec.entity.table} | {c.rsplit(".", 1)[0] for c in referenced_columns(spec)})
