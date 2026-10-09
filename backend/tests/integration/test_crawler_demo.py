@@ -4,10 +4,12 @@ import psycopg
 import pytest
 from pydantic import SecretStr
 
+from cohortsplit.cohort_spec.draft import referenced_columns
 from cohortsplit.crawler.catalog import WarehouseCatalog
 from cohortsplit.crawler.metadata import collect_catalog
 from cohortsplit.crawler.sampling import SamplingPolicy
 from cohortsplit.crawler.settings import DEFAULT_SAMPLE_DENYLIST
+from cohortsplit.crawler.use_cases import generate_use_cases
 from cohortsplit.warehouse import PostgresWarehouseAdapter, ReadOnlyExecutor
 
 pytestmark = pytest.mark.integration
@@ -123,3 +125,34 @@ def test_no_pii_values_anywhere_in_catalog(
         for value in row:
             if value:
                 assert str(value) not in dumped
+
+
+def test_demo_crawl_generates_pending_use_cases(demo_catalog: WarehouseCatalog) -> None:
+    result = generate_use_cases(demo_catalog)
+
+    assert len(result.use_cases) >= 8
+    assert all(u.status == "pending_review" for u in result.use_cases)
+    for use_case in result.use_cases:
+        assert referenced_columns(use_case.spec) <= demo_catalog.qualified_columns()
+
+
+def test_demo_liked_product_rewritten_with_real_value(
+    demo_catalog: WarehouseCatalog, warehouse_ro_dsn: str
+) -> None:
+    result = generate_use_cases(demo_catalog)
+
+    liked = next(u for u in result.use_cases if u.template_key == "liked_product")
+    assert liked.status == "pending_review"
+    assert liked.rewritten_from is not None
+    assert "liked" in liked.rewritten_from
+    assert liked.generation_note is not None
+    assert "likes" in liked.generation_note
+    assert liked.nl_request.startswith("Users who bought product ")
+    product_id = liked.nl_request.rsplit(" ", 1)[1]
+    with psycopg.connect(warehouse_ro_dsn) as conn:
+        row = conn.execute(
+            "SELECT count(*) FROM products WHERE product_id = %s::bigint", [product_id]
+        ).fetchone()
+    assert row == (1,)
+    dropped = {d.template_key for d in result.dropped}
+    assert "viewed_product" in dropped
