@@ -99,7 +99,7 @@ def create_app(settings: Settings | None = None, *, engine: Engine | None = None
     )
     app.include_router(_api_router(engine))
     install_auth(app, settings, engine)
-    install_semantic(app)
+    install_semantic(app, settings, engine)
     if settings.frontend_dist is not None:
         _mount_frontend(app, settings.frontend_dist)
     return app

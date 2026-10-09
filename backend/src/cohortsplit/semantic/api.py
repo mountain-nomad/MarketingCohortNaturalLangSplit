@@ -19,13 +19,29 @@ from fastapi import APIRouter, Body, Depends, Query, Request, Response
 from sqlalchemy import Row
 from sqlalchemy.orm import Session
 
+from cohortsplit.audit import actions
+from cohortsplit.audit.service import Actor, AuditEventIn, AuditService, Outcome
 from cohortsplit.auth.clock import Clock, get_clock
-from cohortsplit.auth.dependencies import DbSession, get_request_id, require_permission
+from cohortsplit.auth.dependencies import (
+    DbSession,
+    get_audit,
+    get_request_id,
+    require_permission,
+)
+from cohortsplit.auth.errors import ApiError, ConflictError, ServiceUnavailableError
 from cohortsplit.auth.policy import Principal
+from cohortsplit.config import ConfigError
 from cohortsplit.crawler.sampling import ExportGrantProvider
+from cohortsplit.crawler.service import CrawlFailedError
 from cohortsplit.crawler.settings import CrawlerSettings
 from cohortsplit.semantic import repository as repo
 from cohortsplit.semantic.context import BusinessContextIn
+from cohortsplit.semantic.crawl import (
+    CrawlCoordinator,
+    CrawlEnvironment,
+    CrawlInProgressError,
+    get_crawl_environment,
+)
 from cohortsplit.semantic.inventory import SchemaInventory, check_definition
 from cohortsplit.semantic.models import BusinessContextEntry, SemanticVersionRecord
 from cohortsplit.semantic.provider import read_snapshot
@@ -37,6 +53,7 @@ from cohortsplit.semantic.service import (
     UseCaseEdit,
 )
 from cohortsplit.semantic.snapshot import PromptTable, parse_definition
+from cohortsplit.warehouse.errors import WarehouseNotConfiguredError
 
 router = APIRouter(prefix="/api/semantic", tags=["semantic"])
 
@@ -46,6 +63,10 @@ UseCaseStatusQuery = Literal["pending_review", "confirmed", "rejected", "needs_r
 CanRead = Annotated[Principal, Depends(require_permission("semantic_context.read"))]
 CanEdit = Annotated[Principal, Depends(require_permission("semantic_context.edit"))]
 CanReview = Annotated[Principal, Depends(require_permission("use_case.review"))]
+CanCrawl = Annotated[Principal, Depends(require_permission("crawler.run"))]
+
+crawler_router = APIRouter(prefix="/api/crawler", tags=["crawler"])
+MAX_RUNS = 100
 
 
 @dataclass(frozen=True)
@@ -55,6 +76,8 @@ class SemanticState:
     service: SemanticContextService
     crawler_settings: Callable[[], CrawlerSettings]
     export_grants: ExportGrantProvider
+    coordinator: CrawlCoordinator
+    crawl_environment: CrawlEnvironment
 
 
 def get_semantic_state(request: Request) -> SemanticState:
@@ -344,3 +367,71 @@ def semantic_versions(
         "limit": limit,
         "offset": offset,
     }
+
+
+# -- crawler -------------------------------------------------------------------------------
+
+
+@crawler_router.post("/runs", status_code=201)
+def start_crawl(
+    request: Request,
+    principal: CanCrawl,
+    db: DbSession,
+    state: State,
+    environment: Annotated[CrawlEnvironment, Depends(get_crawl_environment)],
+    audit: Annotated[AuditService, Depends(get_audit)],
+    clock: Annotated[Clock, Depends(get_clock)],
+) -> dict[str, Any]:
+    """Crawl now (synchronously). One crawl at a time; human content is never overwritten."""
+    actor = Actor.user(principal.user_id)
+
+    def start_event(outcome: Outcome, metadata: dict[str, object]) -> AuditEventIn:
+        return AuditEventIn(
+            action=actions.CRAWLER_START,
+            outcome=outcome,
+            actor=actor,
+            occurred_at=clock(),
+            target_type="crawler",
+            target_id=None,
+            request_id=get_request_id(request),
+            metadata=metadata,
+        )
+
+    def on_start() -> None:
+        # Fail closed: no crawl without its audit record (AuditWriteError -> 503).
+        audit.record_detached(start_event("success", {}), sensitive=True)
+
+    try:
+        outcome = state.coordinator.run(
+            environment,
+            actor=actor,
+            triggered_by=f"user:{principal.user_id}",
+            now=clock,
+            on_start=on_start,
+        )
+    except WarehouseNotConfiguredError as exc:
+        raise ServiceUnavailableError("warehouse_not_configured", str(exc)) from None
+    except ConfigError as exc:
+        raise ServiceUnavailableError("crawler_misconfigured", str(exc)) from None
+    except CrawlInProgressError:
+        audit.record_detached(
+            start_event("denied", {"reason": "crawl_in_progress"}), sensitive=False
+        )
+        raise ConflictError(
+            "crawl_in_progress", "Another crawl is running. Try again when it has finished."
+        ) from None
+    except CrawlFailedError as exc:
+        raise ApiError(502, "crawl_failed", str(exc), extra={"run_id": exc.run_id}) from None
+
+    run = run_out(repo.get_run(db, outcome.report.run_id))
+    assert run is not None  # noqa: S101 (just recorded)
+    return {**run, "semantic_version": outcome.semantic_version.version}
+
+
+@crawler_router.get("/runs")
+def list_crawl_runs(
+    _: CanRead,
+    db: DbSession,
+    limit: Annotated[int, Query(ge=1, le=MAX_RUNS)] = 20,
+) -> dict[str, Any]:
+    return {"items": [run_out(r) for r in repo.list_runs(db, limit)]}

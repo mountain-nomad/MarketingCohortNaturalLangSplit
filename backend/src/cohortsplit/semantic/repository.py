@@ -57,6 +57,10 @@ def latest_run(db: Session) -> Row[Any] | None:
     return db.execute(select(crawl_runs).order_by(crawl_runs.c.id.desc()).limit(1)).first()
 
 
+def get_run(db: Session, run_id: int) -> Row[Any] | None:
+    return db.execute(select(crawl_runs).where(crawl_runs.c.id == run_id)).first()
+
+
 def list_runs(db: Session, limit: int) -> list[Row[Any]]:
     return list(db.execute(select(crawl_runs).order_by(crawl_runs.c.id.desc()).limit(limit)).all())
 
