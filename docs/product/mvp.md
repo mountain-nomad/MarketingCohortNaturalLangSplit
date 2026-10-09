@@ -34,10 +34,10 @@ MVP deployment model: **one instance, per-user login, admin-managed dynamic role
 
 ```text
 clone repo
-  -> configure datasource (PostgreSQL, read-only DB user), LLM provider,
-     export-column allowlist in config/env
+  -> configure datasource (PostgreSQL, read-only DB user) and LLM provider in config/env
   -> start app (docker compose)
-  -> bootstrap the first admin; admin creates roles and users
+  -> bootstrap the first admin via CLI; admin creates roles, users, and per-role
+     export-column grants (e.g. users.phone)
   -> run metadata crawler
   -> crawler writes generated semantic docs: schema, relationships, sample values,
      row counts, and data-driven example use cases (NL -> spec pairs), all "pending review"
@@ -62,9 +62,11 @@ clone repo
 6. Marketer configures split:
      - experiment key (required, e.g. push_black_friday_2026)
      - test / control allocation in percent (default 50/50)
-     - export columns: canonical user ID (always) + optional allowlisted columns
+     - export columns: canonical user ID (always) + optional columns the user's roles
+       are granted for export
 7. System assigns users deterministically and shows test and control counts
 8. Marketer downloads one ZIP: <key>_test.csv, <key>_control.csv, manifest.json
+   The run is recorded in the History tab
 9. (Outside the product) marketer sends the push campaign to the test group only;
    control receives nothing; results are compared later
 ```
@@ -124,9 +126,16 @@ clone repo
 
 ### FR-9 Export
 - One ZIP per split containing `<key>_test.csv`, `<key>_control.csv`, and `manifest.json`.
-- Each CSV always contains the canonical user ID column; additional columns **only if present in the server-config allowlist**.
+- Each CSV always contains the canonical user ID column; additional columns **only if one of the user's roles holds an export grant for that column**, checked at download time.
 - Manifest: original NL request, structured spec, compiled SQL, semantic-context version, experiment key, allocation, per-group counts, timestamp.
 - One row per user per file.
+
+### FR-9a Run history
+- Every executed split is recorded as a **run**: original NL request, structured spec, compiled SQL, semantic-context version, experiment key, allocation, per-group counts, creator, timestamp, and the **membership snapshot** (canonical user ID + assigned group for every cohort member).
+- The snapshot stores **only canonical user IDs and groups** — no PII.
+- **History tab** in the user dashboard lists runs. A user sees their own runs; users with `cohort.read_all` (admin always) see everyone's.
+- **Re-download** rebuilds the ZIP from the stored snapshot: membership and groups are exactly the original; extra columns (e.g. `phone`) are fetched again from the warehouse at download time, subject to the user's **current** export grants. Users no longer present in the warehouse appear with empty extra columns and are counted in the manifest.
+- Runs are not re-executed (no refresh); the stored snapshot is the record of the experiment population.
 
 ### FR-10 LLM provider
 - One provider interface speaking the OpenAI-compatible API: configurable base URL, model name, optional API key.
@@ -167,13 +176,14 @@ Still enforced in MVP (non-negotiable, fail closed):
 - AST-based SQL validation (single `SELECT`, no DML/DDL/DCL, allowlisted schemas/tables).
 - Statement timeout and row cap.
 - Warehouse credentials never reach the LLM or logs.
-- **Export-column allowlist** in server config; default exports user ID only. Requests for non-allowlisted columns are refused server-side.
+- **Per-role export-column grants**; the canonical user ID is the only column exportable by default. Requests for non-granted columns are refused server-side, including on re-download.
 - **Authentication and RBAC:** every endpoint requires an authenticated user and the permission for that action, enforced on the backend (see `docs/product/authentication.md`).
-- **Sampling policy:** sample values collected only for low-cardinality columns; never for allowlisted export columns or columns on a configurable denylist (default includes names like `email`, `phone`, `password*`, `*token*`, `address*`). Sample values may be sent to a remote LLM; sampling can be disabled entirely by config.
+- **Sampling policy:** sample values collected only for low-cardinality columns; never for columns granted for export or columns on a configurable denylist (default includes names like `email`, `phone`, `password*`, `*token*`, `address*`). Sample values may be sent to a remote LLM; sampling can be disabled entirely by config.
 - LLM only sees schema metadata, semantic docs, confirmed use cases, and policy-permitted sample values — never cohort result rows.
-- Structured application logs per execution (request, spec hash, SQL hash, semantic version, row count, experiment key) without PII. Operational logging, not the future audit feature.
+- Structured application logs per execution (request, spec hash, SQL hash, semantic version, row count, experiment key) without PII. Operational logging, separate from the audit log.
+- **Audit log** (MVP): cohort runs, exports and re-downloads, user/role/permission/grant changes, semantic-context changes — see `docs/product/authentication.md`.
 
-Scope of RLS, PII classification, per-role export columns, and audit log within the MVP is decided in `docs/product/authentication.md`.
+Deferred to post-MVP (architecture must allow them): row-level security, table-level grants, PII classification.
 
 ## Edge Cases
 
@@ -203,7 +213,7 @@ Scope of RLS, PII classification, per-role export columns, and audit log within 
 
 ## Non-Goals (MVP)
 
-- Saved cohorts and refresh.
+- Cohort refresh (re-executing a past run against current data); history keeps the original snapshot only.
 - Warehouses other than PostgreSQL.
 - More than two groups (multi-arm tests).
 - Sample-size / MDE / power calculator and experiment result analysis.
@@ -247,9 +257,15 @@ Demo dataset = `ecommerce` from `harryho/db-samples`. Product/category names in 
 - **AC-18** Given an allocation not summing to 100, a group below 1%, or an empty key, the split is refused with a validation error.
 
 ### Export & data policy
-- **AC-19** Given `users.phone` is not allowlisted, when an export with `phone` is requested (including via direct API call), the server refuses it.
-- **AC-20** Given `users.phone` is allowlisted, the export contains `user_id, phone`, one row per user, and the preview reports the NULL-phone count.
+- **AC-19** Given none of the user's roles is granted export of `users.phone`, when an export with `phone` is requested (including via direct API call), the server refuses it.
+- **AC-20** Given a role of the user is granted export of `users.phone`, the export contains `user_id, phone`, one row per user, and the preview reports the NULL-phone count.
 - **AC-21** The export ZIP contains `<key>_test.csv`, `<key>_control.csv`, and a manifest with NL request, spec, SQL, semantic version, experiment key, allocation, and per-group counts.
+
+### Run history
+- **AC-21a** Given a completed run, when its creator re-downloads it from History, then test/control membership is identical to the original export.
+- **AC-21b** Given the user lost the `users.phone` export grant after the original export, when they re-download with `phone`, then the server refuses it.
+- **AC-21c** The stored run snapshot contains no columns other than canonical user ID and group.
+- **AC-21d** Given user A without `cohort.read_all`, A cannot list or download user B's runs (including via direct API).
 
 ### Crawler, use cases & admin page
 - **AC-22** Running the crawler on the demo DB produces docs listing all `ecommerce` tables, columns, PK/FK relationships, row counts, sample values for `orders.status` and `carts.status`, and data-driven example use cases marked pending review.
@@ -276,7 +292,10 @@ Demo dataset = `ecommerce` from `harryho/db-samples`. Product/category names in 
 | Deployment | Per-user login; admin manages dynamic roles (separate feature `feature/authentication-rbac`) |
 | SQL generation | LLM → structured spec → deterministic compiler; LLM never writes executed SQL |
 | Interpretation | Shown to marketer and confirmed before execution |
-| Export columns | User ID by default; extra columns (e.g. phone) only via server-config allowlist |
+| Export columns | User ID by default; extra columns (e.g. phone) only via per-role export grants |
+| History | Runs stored as ID+group snapshot; re-download re-fetches extra columns under current permissions; own runs, or all with `cohort.read_all` |
+| Audit log | MVP |
+| RLS / table grants | Post-MVP; architecture must allow them |
 | UI | Web UI for marketers; admin page for business logic |
 | LLM | One OpenAI-compatible interface; cloud or local (Qwen) |
 | Demo data | `ecommerce` from `harryho/db-samples`, pinned, fetched at build; no supplementary data |
@@ -297,11 +316,11 @@ Every major feature gets its own branch, product spec (when needed), plan in `do
 |---|---|---|---|
 | 0 | `feature/mvp-spec` | This document | — |
 | 1 | `feature/project-skeleton` | Repo layout, backend/frontend scaffolding, docker compose, demo Postgres (FR-11), CI, lint/type/test tooling | 0 |
-| 2 | `feature/authentication-rbac` | Login, first-admin bootstrap, users, dynamic roles/permissions, admin dashboard shell, user dashboard shell | 1 |
+| 2 | `feature/authentication-rbac` | Login, first-admin CLI, users, dynamic roles/permissions, column export grants, audit log, admin and user dashboard shells | 1 |
 | 3 | `feature/warehouse-crawler` | PostgreSQL adapter, read-only execution, metadata crawler, generated docs, sampling policy (FR-1, FR-2) | 1 |
 | 4 | `feature/semantic-context` | Business context editing, versioning, use-case review queue in admin page (FR-3) | 2, 3 |
 | 5 | `feature/cohort-compiler` | LLM provider, NL → spec, deterministic compiler, SQL validation, interpretation + preview (FR-4–FR-7, FR-10) | 3, 4 |
-| 6 | `feature/experiment-split` | Test/control assignment, export ZIP + manifest, export allowlist (FR-8, FR-9) | 5 |
+| 6 | `feature/experiment-split` | Test/control assignment, export ZIP + manifest, export-grant enforcement, run history tab (FR-8, FR-9, FR-9a) | 2, 5 |
 
 ## Open Questions
 
