@@ -173,6 +173,30 @@ describe('RolesTab', () => {
     )
   })
 
+  it('marks export grants whose column is missing from the latest crawl (FR-A4)', async () => {
+    const u = userEvent.setup()
+    const marketer = {
+      ...roles.items[1],
+      export_columns: ['public.users.email', 'public.users.phone'],
+      missing_export_columns: ['public.users.phone'],
+      column_inventory: 'available',
+    }
+    mockApi({
+      'GET /api/admin/permissions': { body: catalog },
+      'GET /api/admin/roles': { body: { items: [roles.items[0], marketer] } },
+      'GET /api/admin/users': { body: users },
+    })
+    render(<RolesTab />)
+
+    const row = (await screen.findByText('Marketer')).closest('li') as HTMLElement
+    expect(within(row).getByText('public.users.phone (missing)')).toBeInTheDocument()
+    expect(within(row).queryByText('public.users.email (missing)')).not.toBeInTheDocument()
+
+    await u.click(within(row).getByRole('button', { name: 'Edit' }))
+    const form = await screen.findByRole('form', { name: 'Role editor' })
+    expect(within(form).getByText(/not found in the latest crawl: public\.users\.phone/i)).toBeInTheDocument()
+  })
+
   it('shows validation errors from the server', async () => {
     const u = userEvent.setup()
     baseApi({
