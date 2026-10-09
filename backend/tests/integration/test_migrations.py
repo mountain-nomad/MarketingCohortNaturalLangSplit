@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import inspect, text
 
 from cohortsplit.config import Settings
@@ -30,7 +31,9 @@ def test_upgrade_head_then_downgrade_base(appdb_settings: Settings) -> None:
     cfg = Config(str(ALEMBIC_INI))
     try:
         command.upgrade(cfg, "head")
-        assert _version_rows(appdb_settings) == ["0001_baseline"]
+        assert _version_rows(appdb_settings) == [
+            ScriptDirectory.from_config(cfg).get_current_head()
+        ]
 
         command.downgrade(cfg, "base")
         assert _version_rows(appdb_settings) in (None, [])
