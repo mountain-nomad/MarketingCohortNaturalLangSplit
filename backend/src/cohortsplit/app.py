@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import Engine
 
 from cohortsplit import __version__
+from cohortsplit.auth.wiring import install_auth
 from cohortsplit.config import Settings, load_settings
 from cohortsplit.db import AppDatabaseUnavailableError, check_appdb, create_appdb_engine
 from cohortsplit.db import describe_location as describe_db
@@ -67,10 +68,10 @@ def _mount_frontend(app: FastAPI, dist: Path) -> None:
         return FileResponse(index)
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, engine: Engine | None = None) -> FastAPI:
     settings = settings or load_settings()
     _configure_logging(settings.log_level)
-    engine = create_appdb_engine(settings)
+    engine = engine or create_appdb_engine(settings)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -90,11 +91,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         title="CohortSplit",
         version=__version__,
         lifespan=lifespan,
-        docs_url="/api/docs",
-        openapi_url="/api/openapi.json",
+        # API docs are not public; install_auth serves them to signed-in users when enabled.
+        docs_url=None,
+        openapi_url=None,
         redoc_url=None,
     )
     app.include_router(_api_router(engine))
+    install_auth(app, settings, engine)
     if settings.frontend_dist is not None:
         _mount_frontend(app, settings.frontend_dist)
     return app

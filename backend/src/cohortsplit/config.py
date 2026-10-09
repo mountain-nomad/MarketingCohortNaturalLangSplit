@@ -38,6 +38,17 @@ class Settings(BaseSettings):
     # Directory with the built frontend (index.html); when unset, no UI is served.
     frontend_dist: Path | None = None
 
+    # --- Authentication (docs/product/authentication.md, resolved decision 1) ---
+    session_idle_timeout_minutes: int = Field(default=480, ge=1)
+    session_max_lifetime_hours: int = Field(default=168, ge=1)
+    login_max_failures: int = Field(default=5, ge=1)
+    login_failure_window_minutes: int = Field(default=15, ge=1)
+    login_lockout_minutes: int = Field(default=15, ge=1)
+    # Session cookie `Secure` flag: true/false, or unset = auto (Secure when served over HTTPS).
+    cookie_secure: bool | None = None
+    # Interactive API docs (/api/docs, /api/openapi.json); when enabled they require a session.
+    api_docs_enabled: bool = False
+
     @field_validator("appdb_password")
     @classmethod
     def _secret_not_empty(cls, value: SecretStr) -> SecretStr:
