@@ -83,7 +83,7 @@ def _parse(raw: str) -> LlmResult:
     text = fenced.group(1) if fenced else raw
     try:
         value = json.loads(text)
-    except ValueError as exc:
+    except json.JSONDecodeError as exc:
         raise ValueError(f"the answer is not valid JSON ({exc.msg})") from None
     return _RESULT.validate_python(value)
 

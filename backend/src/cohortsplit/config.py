@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     warehouse_row_cap: int = Field(default=1_000_000, ge=1)
     warehouse_connect_timeout_seconds: int = Field(default=5, ge=1)
 
+    # Cohort interpretation / preview (FR-5, FR-7). Interpretations must be confirmed within
+    # their TTL; prepared cohorts (definition only, no rows) live for the split step.
+    cohort_interpretation_ttl_minutes: int = Field(default=60, ge=1, le=1440)
+    cohort_prepared_ttl_minutes: int = Field(default=1440, ge=1, le=10080)
+    cohort_preview_sample_size: int = Field(default=20, ge=1, le=100)
+
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     # Directory with the built frontend (index.html); when unset, no UI is served.
     frontend_dist: Path | None = None
