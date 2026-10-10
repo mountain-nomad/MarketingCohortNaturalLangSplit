@@ -12,7 +12,7 @@ Every change runs in the caller's session transaction, in this order:
 The caller commits.
 """
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any, Literal
@@ -22,8 +22,16 @@ from sqlalchemy.orm import Session
 
 from cohortsplit.audit import actions
 from cohortsplit.audit.service import Actor, AuditEventIn, AuditService
-from cohortsplit.auth.errors import ConflictError, NotFoundError, UnprocessableError
+from cohortsplit.auth.errors import (
+    ConflictError,
+    NotFoundError,
+    ServiceUnavailableError,
+    UnprocessableError,
+)
 from cohortsplit.cohort_spec.draft import DraftCohortSpec, referenced_columns
+from cohortsplit.config import ConfigError
+from cohortsplit.crawler.sampling import SamplingPolicy
+from cohortsplit.crawler.settings import CrawlerSettings, load_crawler_settings
 from cohortsplit.semantic import repository as repo
 from cohortsplit.semantic.context import (
     MAX_DESCRIPTION_LENGTH,
@@ -36,6 +44,7 @@ from cohortsplit.semantic.context import (
 from cohortsplit.semantic.inventory import ReferenceProblem, SchemaInventory, check_definition
 from cohortsplit.semantic.inventory import check_spec as check_spec_references
 from cohortsplit.semantic.models import BusinessContextEntry
+from cohortsplit.semantic.snapshot import withheld_reasons
 from cohortsplit.semantic.version import EntryContent, SemanticVersion
 
 UseCaseStatus = Literal["pending_review", "confirmed", "rejected", "needs_rereview"]
@@ -135,8 +144,31 @@ def _terms(content: EntryContent) -> frozenset[str]:
 
 
 class SemanticContextService:
-    def __init__(self, audit: AuditService) -> None:
+    def __init__(
+        self,
+        audit: AuditService,
+        crawler_settings: Callable[[], CrawlerSettings] = load_crawler_settings,
+    ) -> None:
         self._audit = audit
+        self._crawler_settings = crawler_settings
+
+    def sampling_policy(self, db: Session) -> SamplingPolicy:
+        """Today's sampling policy (settings + export grants read in ``db``). Fails closed:
+        without a valid crawler configuration nothing is shown or versioned (503)."""
+        try:
+            settings = self._crawler_settings()
+        except ConfigError as exc:
+            raise ServiceUnavailableError("crawler_misconfigured", str(exc)) from None
+        return repo.current_policy(db, settings)
+
+    def current_version(self, db: Session) -> SemanticVersion:
+        return repo.compute_current_version(db, self.sampling_policy(db))
+
+    def withheld(self, db: Session, rows: list[Any]) -> dict[int, str]:
+        """Generated use cases whose literals today's policy forbids, with the reason."""
+        return withheld_reasons(
+            [repo.use_case_row(r) for r in rows], repo.generated_docs(db), self.sampling_policy(db)
+        )
 
     # -- shared steps ------------------------------------------------------------------
 
@@ -152,7 +184,10 @@ class SemanticContextService:
         metadata: Mapping[str, object],
     ) -> SemanticVersion:
         db.flush()
-        after = repo.compute_current_version(db)
+        # Re-read what was stored (JSONB round trip), so the recorded version equals what
+        # any later read computes (e.g. 1e20 is stored and read back as an integer).
+        db.expire_all()
+        after = self.current_version(db)
         repo.record_version_if_changed(
             db,
             after,
@@ -226,7 +261,7 @@ class SemanticContextService:
                 "business_context_key_taken", f'An entry with key "{data.key}" already exists.'
             )
         self._validate_entry(db, data, replacing=None)
-        before = repo.compute_current_version(db)
+        before = self.current_version(db)
         content = _content_of(data)
         entry = BusinessContextEntry(
             key=content.key,
@@ -260,7 +295,7 @@ class SemanticContextService:
             raise NotFoundError("Business-context entry")
         data = update.with_key(key)
         self._validate_entry(db, data, replacing=key)
-        before = repo.compute_current_version(db)
+        before = self.current_version(db)
         old = repo.entry_content(entry)
         new = _content_of(data)
         entry.kind = new.kind
@@ -285,7 +320,7 @@ class SemanticContextService:
         entry = repo.get_entry(db, key)
         if entry is None:
             raise NotFoundError("Business-context entry")
-        before = repo.compute_current_version(db)
+        before = self.current_version(db)
         old = repo.entry_content(entry)
         db.delete(entry)
         self._finish(
@@ -334,7 +369,10 @@ class SemanticContextService:
                 "invalid_spec", "The stored spec is no longer valid; edit the use case instead."
             ) from None
         self._check_spec(db, spec)
-        before = repo.compute_current_version(db)
+        reason = self.withheld(db, [row]).get(row.id)
+        if reason is not None:
+            raise ConflictError("use_case_withheld", f"This use case cannot be confirmed: {reason}")
+        before = self.current_version(db)
         repo.update_use_case(
             db,
             use_case_id,
@@ -360,7 +398,7 @@ class SemanticContextService:
         row = self._locked_use_case(db, use_case_id)
         if row.status not in REJECTABLE:
             raise self._transition_error(row, "rejected")
-        before = repo.compute_current_version(db)
+        before = self.current_version(db)
         repo.update_use_case(
             db,
             use_case_id,
@@ -391,7 +429,7 @@ class SemanticContextService:
         """A reviewer rewrites the use case: it becomes human-authored and confirmed."""
         row = self._locked_use_case(db, use_case_id)
         self._check_spec(db, edit.spec)
-        before = repo.compute_current_version(db)
+        before = self.current_version(db)
         spec = edit.spec.model_dump(mode="json", exclude_none=True)
         repo.update_use_case(
             db,

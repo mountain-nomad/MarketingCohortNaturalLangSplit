@@ -10,7 +10,6 @@
 | ``GET /api/semantic/version``, ``GET /api/semantic/versions`` | ``semantic_context.read`` |
 """
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any, Literal
@@ -31,9 +30,7 @@ from cohortsplit.auth.dependencies import (
 from cohortsplit.auth.errors import ApiError, ConflictError, ServiceUnavailableError
 from cohortsplit.auth.policy import Principal
 from cohortsplit.config import ConfigError
-from cohortsplit.crawler.sampling import ExportGrantProvider
 from cohortsplit.crawler.service import CrawlFailedError
-from cohortsplit.crawler.settings import CrawlerSettings
 from cohortsplit.semantic import repository as repo
 from cohortsplit.semantic.context import BusinessContextIn
 from cohortsplit.semantic.crawl import (
@@ -74,8 +71,6 @@ class SemanticState:
     """Per-application semantic objects, stored on ``app.state.semantic``."""
 
     service: SemanticContextService
-    crawler_settings: Callable[[], CrawlerSettings]
-    export_grants: ExportGrantProvider
     coordinator: CrawlCoordinator
     crawl_environment: CrawlEnvironment
 
@@ -178,16 +173,21 @@ def _entries_out(db: Session, entries: list[BusinessContextEntry]) -> list[dict[
     return [_entry_out(e, users, inventory) for e in entries]
 
 
-def _use_cases_out(db: Session, rows: list[Row[Any]]) -> list[dict[str, Any]]:
+def _use_cases_out(
+    db: Session, rows: list[Row[Any]], service: SemanticContextService
+) -> list[dict[str, Any]]:
     users = repo.user_refs(db, [r.reviewed_by for r in rows])
+    # Literals today's sampling policy forbids are never shown (ruling S7).
+    withheld = service.withheld(db, rows)
     return [
         {
             "id": r.id,
             "key": r.use_case_key,
             "origin": r.origin,
             "status": r.status,
-            "nl_request": r.nl_request,
-            "spec": dict(r.spec),
+            "withheld": withheld.get(r.id),
+            "nl_request": None if r.id in withheld else r.nl_request,
+            "spec": None if r.id in withheld else dict(r.spec),
             "spec_version": r.spec_version,
             "template_key": r.template_key,
             "rewritten_from": r.rewritten_from,
@@ -202,10 +202,10 @@ def _use_cases_out(db: Session, rows: list[Row[Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def _use_case_out(db: Session, use_case_id: int) -> dict[str, Any]:
+def _use_case_out(db: Session, use_case_id: int, service: SemanticContextService) -> dict[str, Any]:
     row = repo.get_use_case(db, use_case_id)
     assert row is not None  # noqa: S101 (just written in this request)
-    return _use_cases_out(db, [row])[0]
+    return _use_cases_out(db, [row], service)[0]
 
 
 def _version_record_out(
@@ -229,8 +229,7 @@ def _version_record_out(
 @router.get("/docs")
 def generated_docs(_: CanRead, db: DbSession, state: State) -> dict[str, Any]:
     """Generated schema docs with row counts and the samples the current policy permits."""
-    policy = state.crawler_settings().sampling_policy(state.export_grants.export_granted_columns())
-    snapshot = read_snapshot(db, policy)
+    snapshot = read_snapshot(db, state.service.sampling_policy(db))
     return {
         "tables": [_table_out(t) for t in snapshot.tables],
         "latest_run": run_out(repo.latest_run(db)),
@@ -293,9 +292,9 @@ def delete_business_context(
 
 @router.get("/use-cases")
 def list_use_cases(
-    _: CanRead, db: DbSession, status: UseCaseStatusQuery | None = None
+    _: CanRead, db: DbSession, state: State, status: UseCaseStatusQuery | None = None
 ) -> dict[str, Any]:
-    return {"items": _use_cases_out(db, repo.list_use_cases(db, status))}
+    return {"items": _use_cases_out(db, repo.list_use_cases(db, status), state.service)}
 
 
 @router.post("/use-cases/{use_case_id}/confirm")
@@ -309,7 +308,7 @@ def confirm_use_case(
 ) -> dict[str, Any]:
     state.service.confirm(db, use_case_id, _ctx(request, principal, clock))
     db.commit()
-    return _use_case_out(db, use_case_id)
+    return _use_case_out(db, use_case_id, state.service)
 
 
 @router.post("/use-cases/{use_case_id}/reject")
@@ -325,7 +324,7 @@ def reject_use_case(
     note = body.note if body is not None else None
     state.service.reject(db, use_case_id, note, _ctx(request, principal, clock))
     db.commit()
-    return _use_case_out(db, use_case_id)
+    return _use_case_out(db, use_case_id, state.service)
 
 
 @router.put("/use-cases/{use_case_id}")
@@ -340,15 +339,15 @@ def edit_use_case(
 ) -> dict[str, Any]:
     state.service.edit(db, use_case_id, body, _ctx(request, principal, clock))
     db.commit()
-    return _use_case_out(db, use_case_id)
+    return _use_case_out(db, use_case_id, state.service)
 
 
 # -- semantic version ----------------------------------------------------------------------
 
 
 @router.get("/version")
-def semantic_version(_: CanRead, db: DbSession) -> dict[str, Any]:
-    current = repo.compute_current_version(db)
+def semantic_version(_: CanRead, db: DbSession, state: State) -> dict[str, Any]:
+    current = state.service.current_version(db)
     return {"version": current.version, "components": current.components()}
 
 

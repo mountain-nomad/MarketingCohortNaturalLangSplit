@@ -80,8 +80,11 @@ export interface UseCase {
   key: string
   origin: 'generated' | 'human'
   status: UseCaseStatus
-  nl_request: string
-  spec: Record<string, unknown>
+  /** Set when today's sampling policy forbids a literal of this generated use case: its
+   * request and spec are then withheld (null) and it cannot be confirmed. */
+  withheld?: string | null
+  nl_request: string | null
+  spec: Record<string, unknown> | null
   spec_version: string
   template_key: string | null
   rewritten_from: string | null

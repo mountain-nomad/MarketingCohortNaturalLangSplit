@@ -11,7 +11,7 @@ Usage (feature/cohort-compiler)::
     snapshot.semantic_version             # record with the cohort run and export
     snapshot.canonical_user_id            # "schema.table.column" or None -> refuse the run
     snapshot.business_context             # human definitions whose references resolve
-    snapshot.confirmed_use_cases          # few-shot examples (confirmed only)
+    snapshot.confirmed_use_cases          # few-shot examples (confirmed, not withheld)
     snapshot.tables                       # raw schema metadata + policy-permitted samples
 
 Call :meth:`snapshot` once per interpretation and use only its fields, so the version
@@ -21,7 +21,7 @@ recorded with a run is the version of exactly the context the LLM saw.
 from sqlalchemy.orm import Session, sessionmaker
 
 from cohortsplit.crawler.sampling import ExportGrantProvider, SamplingPolicy
-from cohortsplit.crawler.settings import CrawlerSettings
+from cohortsplit.crawler.settings import CrawlerSettings, load_crawler_settings
 from cohortsplit.semantic import repository as repo
 from cohortsplit.semantic.snapshot import (
     PromptUseCase,
@@ -31,9 +31,17 @@ from cohortsplit.semantic.snapshot import (
 from cohortsplit.semantic.version import SemanticVersion
 
 
-def current_semantic_version(db: Session) -> SemanticVersion:
-    """The semantic version of the content stored now (read in ``db``'s transaction)."""
-    return repo.compute_current_version(db)
+def current_semantic_version(
+    db: Session, crawler_settings: CrawlerSettings | None = None
+) -> SemanticVersion:
+    """The semantic version of the LLM context stored now (read in ``db``'s transaction).
+
+    It covers today's sampling policy (``crawler_settings``, default: the environment, plus
+    the export grants stored in ``db``), exactly as :meth:`SemanticContextProvider.snapshot`
+    and ``GET /api/semantic/version`` do.
+    """
+    settings = crawler_settings if crawler_settings is not None else load_crawler_settings()
+    return repo.compute_current_version(db, repo.current_policy(db, settings))
 
 
 def read_snapshot(db: Session, policy: SamplingPolicy) -> SemanticContextSnapshot:
@@ -74,8 +82,9 @@ class SemanticContextProvider:
         return self.snapshot().confirmed_use_cases
 
     def current_semantic_version(self) -> str:
+        policy = self.sampling_policy()
         with self._session_factory() as db:
-            return current_semantic_version(db).version
+            return repo.compute_current_version(db, policy).version
 
     def canonical_user_id(self) -> str | None:
         return self.snapshot().canonical_user_id

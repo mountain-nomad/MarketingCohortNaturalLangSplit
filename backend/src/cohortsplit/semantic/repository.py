@@ -12,21 +12,15 @@ from typing import Any
 from sqlalchemy import Row, func, select, text, update
 from sqlalchemy.orm import Session
 
-from cohortsplit.auth.models import User
+from cohortsplit.auth.models import RoleExportColumn, User
+from cohortsplit.crawler.sampling import SamplingPolicy
+from cohortsplit.crawler.settings import CrawlerSettings
 from cohortsplit.crawler.store import SEMANTIC_CONTENT_LOCK_KEY
 from cohortsplit.crawler.tables import crawl_runs, example_use_cases, semantic_docs
 from cohortsplit.semantic.inventory import SchemaInventory
 from cohortsplit.semantic.models import BusinessContextEntry, SemanticVersionRecord
-from cohortsplit.semantic.snapshot import TABLE_SCHEMA, UseCaseRow
-from cohortsplit.semantic.version import (
-    DocContent,
-    EntryContent,
-    SemanticVersion,
-    UseCaseContent,
-    compute_semantic_version,
-)
-
-CONFIRMED = "confirmed"
+from cohortsplit.semantic.snapshot import TABLE_SCHEMA, UseCaseRow, effective_version
+from cohortsplit.semantic.version import DocContent, EntryContent, SemanticVersion
 
 
 def lock_semantic_content(db: Session) -> None:
@@ -109,40 +103,48 @@ def update_use_case(db: Session, use_case_id: int, values: dict[str, Any]) -> No
     )
 
 
+def use_case_row(row: Row[Any]) -> UseCaseRow:
+    return UseCaseRow(
+        id=row.id,
+        status=row.status,
+        nl_request=row.nl_request,
+        spec=dict(row.spec),
+        spec_version=row.spec_version,
+        origin=row.origin,
+    )
+
+
 def use_case_rows(db: Session) -> list[UseCaseRow]:
     rows = db.execute(
         select(
             example_use_cases.c.id,
+            example_use_cases.c.origin,
             example_use_cases.c.status,
             example_use_cases.c.nl_request,
             example_use_cases.c.spec,
             example_use_cases.c.spec_version,
         ).order_by(example_use_cases.c.id)
     ).all()
-    return [
-        UseCaseRow(
-            id=r.id,
-            status=r.status,
-            nl_request=r.nl_request,
-            spec=dict(r.spec),
-            spec_version=r.spec_version,
-        )
-        for r in rows
-    ]
+    return [use_case_row(r) for r in rows]
 
 
 # -- semantic version ----------------------------------------------------------------------
 
 
-def compute_current_version(db: Session) -> SemanticVersion:
-    """The semantic version of the content currently stored (read in ``db``'s transaction)."""
-    confirmed = [
-        UseCaseContent(r.nl_request, r.spec, r.spec_version)
-        for r in use_case_rows(db)
-        if r.status == CONFIRMED
-    ]
-    return compute_semantic_version(
-        [entry_content(e) for e in list_entries(db)], confirmed, generated_docs(db)
+def current_policy(db: Session, settings: CrawlerSettings) -> SamplingPolicy:
+    """Today's sampling policy: ``settings`` plus every role's export grants, read in ``db``."""
+    grants = frozenset(db.execute(select(RoleExportColumn.column_ref)).scalars())
+    return settings.sampling_policy(grants)
+
+
+def compute_current_version(db: Session, policy: SamplingPolicy) -> SemanticVersion:
+    """The semantic version of the LLM context stored now under ``policy`` (read in ``db``'s
+    transaction): the same value a snapshot assembled from this content reports."""
+    return effective_version(
+        entries=[entry_content(e) for e in list_entries(db)],
+        use_cases=use_case_rows(db),
+        generated_docs=generated_docs(db),
+        policy=policy,
     )
 
 

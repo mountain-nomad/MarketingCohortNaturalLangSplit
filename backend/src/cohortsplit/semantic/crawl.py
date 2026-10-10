@@ -5,8 +5,10 @@
 * The crawl reuses :func:`cohortsplit.crawler.service.run_crawl` with the real
   ``RoleExportGrants`` provider (export-granted columns are never sampled) and the
   ``AuditCrawlHook`` (one ``crawler.run`` event per run).
-* Afterwards the semantic version is recomputed and appended to the history when the
-  crawl changed it (cause ``crawler.run``, target ``crawl_run:<id>``).
+* The semantic version is recomputed **inside the swap transaction** (under the semantic
+  lock) and appended to the history when the crawl changed it (cause ``crawler.run``,
+  target ``crawl_run:<id>``): the new content and its history row commit together, so
+  history neither misses a crawl nor credits its change to a later edit.
 """
 
 from collections.abc import Callable, Iterator
@@ -15,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from fastapi import Request
-from sqlalchemy import Engine, text
+from sqlalchemy import Connection, Engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from cohortsplit.audit.service import Actor, AuditService
@@ -74,26 +76,40 @@ def exclusive_crawl(engine: Engine) -> Iterator[None]:
             conn.commit()
 
 
-def record_crawl_version(
-    session_factory: sessionmaker[Session],
-    run_id: int,
-    *,
-    actor_user_id: int | None,
-    now: datetime,
-) -> SemanticVersion:
-    """Recompute the semantic version after a crawl and record it if it changed."""
-    with session_factory() as db, db.begin():
-        repo.lock_semantic_content(db)
-        version = repo.compute_current_version(db)
-        repo.record_version_if_changed(
-            db,
-            version,
-            cause=CRAWL_CAUSE,
-            target=f"crawl_run:{run_id}",
-            actor_user_id=actor_user_id,
-            now=now,
-        )
-    return version
+class CrawlVersionRecorder:
+    """``CrawlStore`` ``after_swap`` hook: record the crawl's semantic version in the swap
+    transaction.
+
+    The version covers today's sampling policy (``crawler_settings`` plus the export
+    grants read in the same transaction).
+    """
+
+    def __init__(
+        self,
+        crawler_settings: CrawlerSettings,
+        *,
+        actor_user_id: int | None,
+        now: Callable[[], datetime],
+    ) -> None:
+        self._crawler_settings = crawler_settings
+        self._actor_user_id = actor_user_id
+        self._now = now
+        self.version: SemanticVersion | None = None
+
+    def __call__(self, conn: Connection, run_id: int) -> None:
+        # The session joins the swap's open transaction; it never commits it.
+        with Session(bind=conn) as db:
+            policy = repo.current_policy(db, self._crawler_settings)
+            version = repo.compute_current_version(db, policy)
+            repo.record_version_if_changed(
+                db,
+                version,
+                cause=CRAWL_CAUSE,
+                target=f"crawl_run:{run_id}",
+                actor_user_id=self._actor_user_id,
+                now=self._now(),
+            )
+        self.version = version
 
 
 @dataclass(frozen=True)
@@ -124,17 +140,16 @@ class CrawlCoordinator:
         """
         settings = environment.crawler_settings()
         adapter = environment.adapter_factory()
+        recorder = CrawlVersionRecorder(settings, actor_user_id=actor.user_id, now=now)
         with exclusive_crawl(self._engine):
             on_start()
             report = run_crawl(
                 adapter,
-                CrawlStore(self._engine),
+                CrawlStore(self._engine, after_swap=recorder),
                 settings=settings,
                 export_grants=RoleExportGrants(self._session_factory),
                 audit=AuditCrawlHook(self._audit, actor, clock=now),
                 triggered_by=triggered_by,
             )
-            version = record_crawl_version(
-                self._session_factory, report.run_id, actor_user_id=actor.user_id, now=now()
-            )
-        return CrawlOutcome(report=report, semantic_version=version)
+        assert recorder.version is not None  # noqa: S101 (the swap succeeded, so it ran)
+        return CrawlOutcome(report=report, semantic_version=recorder.version)

@@ -21,7 +21,7 @@ from cohortsplit.crawler.service import CrawlFailedError, CrawlReport, run_crawl
 from cohortsplit.crawler.settings import load_crawler_settings
 from cohortsplit.crawler.store import CrawlStore
 from cohortsplit.db import create_appdb_engine, describe_location
-from cohortsplit.semantic.crawl import CrawlInProgressError, exclusive_crawl, record_crawl_version
+from cohortsplit.semantic.crawl import CrawlInProgressError, CrawlVersionRecorder, exclusive_crawl
 from cohortsplit.warehouse.errors import WarehouseNotConfiguredError
 from cohortsplit.warehouse.factory import create_warehouse_adapter
 
@@ -119,26 +119,19 @@ def run(args: argparse.Namespace) -> int:
         with exclusive_crawl(engine):
             report = run_crawl(
                 adapter,
-                CrawlStore(engine),
+                # The crawl's semantic version is recorded in the swap transaction.
+                CrawlStore(
+                    engine,
+                    after_swap=CrawlVersionRecorder(
+                        crawler_settings, actor_user_id=None, now=utcnow
+                    ),
+                ),
                 settings=crawler_settings,
                 # Export-granted columns are never sampled (ruling R2); runs are audited.
                 export_grants=RoleExportGrants(session_factory),
                 audit=AuditCrawlHook(AuditService(session_factory), Actor.cli()),
                 triggered_by="cli",
             )
-            # The crawl may have changed the semantic version (generated docs, flags).
-            try:
-                record_crawl_version(
-                    session_factory, report.run_id, actor_user_id=None, now=utcnow()
-                )
-            except SQLAlchemyError:
-                # The crawl itself is committed; the version is still computed from content,
-                # only this history row is missing. Say so instead of claiming failure.
-                print(
-                    "warning: crawl succeeded but its semantic version could not be recorded "
-                    "in the history.",
-                    file=sys.stderr,
-                )
     except CrawlInProgressError:
         print(
             "crawl refused: another crawl is running (API or CLI). Nothing was changed; "

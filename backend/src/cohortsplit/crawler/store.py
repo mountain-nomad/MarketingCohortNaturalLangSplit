@@ -13,7 +13,7 @@ Re-run rules (FR-2, AC-25 crawler half, AC-26):
 """
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -162,9 +162,16 @@ def _missing_references(
     return tuple(missing)
 
 
+AfterSwap = Callable[[Connection, int], None]
+
+
 class CrawlStore:
-    def __init__(self, engine: Engine) -> None:
+    def __init__(self, engine: Engine, *, after_swap: AfterSwap | None = None) -> None:
+        """``after_swap(conn, run_id)`` runs inside every swap transaction, under the swap
+        lock, after the new content is written (e.g. to record the semantic version). If
+        it raises, the whole swap rolls back and the crawl fails."""
         self._engine = engine
+        self._after_swap = after_swap
 
     # -- runs ------------------------------------------------------------------------------
 
@@ -277,6 +284,8 @@ class CrawlStore:
                     },
                 )
             )
+            if self._after_swap is not None:
+                self._after_swap(conn, run_id)
         return SwapResult(
             inserted_use_cases=len(fresh), preserved_keys=preserved_keys, flagged=flagged
         )

@@ -3,7 +3,6 @@
 from fastapi import FastAPI
 from sqlalchemy import Engine
 
-from cohortsplit.auth.crawler_integration import RoleExportGrants
 from cohortsplit.auth.dependencies import AuthState
 from cohortsplit.config import Settings
 from cohortsplit.crawler.settings import load_crawler_settings
@@ -22,9 +21,7 @@ def install_semantic(app: FastAPI, settings: Settings, engine: Engine) -> None:
         return create_warehouse_adapter(settings)  # read-only role only (FR-1)
 
     app.state.semantic = api.SemanticState(
-        service=SemanticContextService(auth.audit),
-        crawler_settings=load_crawler_settings,
-        export_grants=RoleExportGrants(auth.session_factory),
+        service=SemanticContextService(auth.audit, crawler_settings=load_crawler_settings),
         coordinator=CrawlCoordinator(engine, auth.audit),
         crawl_environment=CrawlEnvironment(
             adapter_factory=adapter, crawler_settings=load_crawler_settings
