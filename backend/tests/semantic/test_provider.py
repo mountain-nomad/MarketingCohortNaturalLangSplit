@@ -18,6 +18,7 @@ from tests.semantic.helpers import (
     first_pending,
     seed_crawl,
     set_status,
+    use_case_by_template,
     use_cases,
 )
 
@@ -154,3 +155,26 @@ def test_docs_endpoint_before_any_crawl(analyst: ApiClient) -> None:
     body = analyst.get("/api/semantic/docs").json()
 
     assert body == {"tables": [], "latest_run": None}
+
+
+def test_confirmed_generated_use_case_withheld_once_its_literal_column_is_export_granted(
+    analyst: ApiClient, engine: Engine, db: Session, clock: FakeClock
+) -> None:
+    """Review fix (BR-7 / S7): a sampled literal copied into a generated use case must not
+    reach the prompt once today's policy forbids that column's values."""
+    seed_crawl(engine)
+    target = use_case_by_template(engine, "from_country")
+    assert analyst.post(f"/api/semantic/use-cases/{target.id}/confirm").status_code == 200
+    provider = SemanticContextProvider(
+        sessionmaker(engine),
+        crawler_settings=CrawlerSettings(),
+        export_grants=RoleExportGrants(sessionmaker(engine)),
+    )
+    assert target.id in {u.id for u in provider.snapshot().confirmed_use_cases}
+
+    make_role(db, "Contact", ["cohort.export"], ["public.addresses.country_code"], now=clock.now)
+    snapshot = provider.snapshot()
+
+    assert target.id not in {u.id for u in snapshot.confirmed_use_cases}
+    assert target.id in snapshot.withheld_use_cases
+    assert target.nl_request not in {u.nl_request for u in snapshot.confirmed_use_cases}

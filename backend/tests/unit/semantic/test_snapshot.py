@@ -215,3 +215,131 @@ def test_unsampled_columns_never_expose_values() -> None:
 
     assert _column(result, "public.users", "email").sample_values == ()
     assert _column(result, "public.users", "phone").sample_values == ()
+
+
+# -- review fixes: literals of generated use cases and the version follow today's policy ---
+
+COUNTRY_SPEC = {
+    "spec_version": "draft-0",
+    "entity": {"table": "public.users", "key": "user_id"},
+    "where": {
+        "type": "related",
+        "path": [{"from_column": "public.users.user_id", "to_column": "public.addresses.user_id"}],
+        "filters": [{"column": "public.addresses.country_code", "operator": "=", "value": "KZ"}],
+    },
+}
+PRODUCT_SPEC = {
+    "spec_version": "draft-0",
+    "entity": {"table": "public.users", "key": "user_id"},
+    "where": {
+        "type": "related",
+        "path": [
+            {"from_column": "public.users.user_id", "to_column": "public.orders.user_id"},
+            {"from_column": "public.orders.order_id", "to_column": "public.order_items.order_id"},
+            {
+                "from_column": "public.order_items.product_id",
+                "to_column": "public.products.product_id",
+            },
+        ],
+        "filters": [{"column": "public.products.product_id", "operator": "=", "value": "12"}],
+    },
+}
+STATUS_SPEC = {
+    "spec_version": "draft-0",
+    "entity": {"table": "public.users", "key": "user_id"},
+    "where": {
+        "type": "related",
+        "path": [{"from_column": "public.users.user_id", "to_column": "public.orders.user_id"}],
+        "filters": [{"column": "public.orders.status", "operator": "=", "value": "delivered"}],
+    },
+}
+
+
+def confirmed_row(id_: int, spec: dict[str, Any], origin: str = "generated") -> UseCaseRow:
+    return UseCaseRow(
+        id=id_,
+        status="confirmed",
+        nl_request=f"literal use case {id_}",
+        spec=spec,
+        spec_version="draft-0",
+        origin=origin,
+    )
+
+
+GRANT_COUNTRY = SamplingPolicy(
+    enabled=True,
+    denylist=DEFAULT_SAMPLE_DENYLIST,
+    export_granted_columns={"public.addresses.country_code"},
+)
+GRANT_PRODUCT_KEY = SamplingPolicy(
+    enabled=True,
+    denylist=DEFAULT_SAMPLE_DENYLIST,
+    export_granted_columns={"public.products.product_id"},
+)
+SAMPLING_OFF = SamplingPolicy(enabled=False, denylist=DEFAULT_SAMPLE_DENYLIST)
+
+
+def test_generated_literals_reach_the_prompt_while_the_policy_permits_them() -> None:
+    rows = [confirmed_row(10, COUNTRY_SPEC), confirmed_row(11, PRODUCT_SPEC)]
+
+    result = snapshot(use_cases=rows)
+
+    assert [u.id for u in result.confirmed_use_cases] == [10, 11]
+    assert result.withheld_use_cases == ()
+
+
+@pytest.mark.parametrize(
+    ("policy", "withheld"),
+    [
+        (GRANT_COUNTRY, (10,)),
+        (GRANT_PRODUCT_KEY, (11,)),
+        (SAMPLING_OFF, (10, 11)),
+    ],
+    ids=["sampled-value-export-granted-now", "key-example-export-granted-now", "sampling-off"],
+)
+def test_generated_use_case_with_a_literal_the_policy_now_forbids_is_withheld(
+    policy: SamplingPolicy, withheld: tuple[int, ...]
+) -> None:
+    rows = [confirmed_row(10, COUNTRY_SPEC), confirmed_row(11, PRODUCT_SPEC)]
+
+    result = snapshot(use_cases=rows, policy=policy)
+
+    assert result.withheld_use_cases == withheld
+    assert not {u.id for u in result.confirmed_use_cases} & set(withheld)
+    texts = {u.nl_request for u in result.confirmed_use_cases}
+    assert not texts & {f"literal use case {i}" for i in withheld}
+
+
+def test_check_constraint_literals_are_schema_metadata_and_stay() -> None:
+    result = snapshot(use_cases=[confirmed_row(12, STATUS_SPEC)], policy=SAMPLING_OFF)
+
+    assert [u.id for u in result.confirmed_use_cases] == [12]
+    assert result.withheld_use_cases == ()
+
+
+def test_human_authored_literals_are_not_withheld() -> None:
+    human = confirmed_row(13, COUNTRY_SPEC, origin="human")
+
+    result = snapshot(use_cases=[human], policy=SAMPLING_OFF)
+
+    assert [u.id for u in result.confirmed_use_cases] == [13]
+
+
+def test_version_follows_the_samples_the_policy_exposes() -> None:
+    base = snapshot()
+    granted = snapshot(
+        policy=SamplingPolicy(
+            enabled=True, denylist=(), export_granted_columns={"public.orders.status"}
+        )
+    )
+
+    assert _column(granted, "public.orders", "status").sample_values == ()
+    assert granted.semantic_version != base.semantic_version
+    assert snapshot().semantic_version == base.semantic_version  # deterministic
+
+
+def test_withheld_use_cases_do_not_count_in_the_version() -> None:
+    without = snapshot(use_cases=[], policy=GRANT_COUNTRY)
+    withheld = snapshot(use_cases=[confirmed_row(10, COUNTRY_SPEC)], policy=GRANT_COUNTRY)
+
+    assert withheld.semantic_version == without.semantic_version

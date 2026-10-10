@@ -315,6 +315,34 @@ describe('SemanticTab', () => {
     })
   })
 
+  it('shows a withheld use case without its content and only allows reject or rewrite', async () => {
+    const withheld = makeUseCase(4, 'pending_review', {
+      nl_request: null,
+      spec: null,
+      withheld: 'Its example value comes from public.addresses.country_code, which the sampling policy no longer permits.',
+    })
+    const calls = mockApi(
+      baseHandlers({
+        'GET /api/semantic/use-cases': { body: { items: [withheld] } },
+        'POST /api/semantic/use-cases/4/reject': { body: { ...withheld, status: 'rejected' } },
+      }),
+    )
+    renderTab(REVIEW)
+    const u = await openView('Use cases')
+
+    const card = (await screen.findByText('Content withheld')).closest('article') as HTMLElement
+    expect(within(card).getByText(/no longer permits/)).toBeInTheDocument()
+    expect(within(card).queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument()
+    await u.click(within(card).getByRole('button', { name: 'Edit' }))
+    const form = screen.getByRole('form', { name: 'Edit use case 4' })
+    expect(within(form).getByLabelText('Request')).toHaveValue('')
+    await u.click(within(form).getByRole('button', { name: 'Cancel' }))
+    await u.click(within(card).getByRole('button', { name: 'Reject' }))
+
+    await vi.waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true))
+    expect(calls.find((c) => c.method === 'POST')?.path).toBe('/api/semantic/use-cases/4/reject')
+  })
+
   it('runs the crawler and reports the result', async () => {
     const calls = mockApi(
       baseHandlers({

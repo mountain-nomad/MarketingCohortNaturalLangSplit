@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from cohortsplit.crawler.sampling import NoExportGrants
 from cohortsplit.crawler.settings import CrawlerSettings
 from cohortsplit.crawler.tables import crawl_runs
+from cohortsplit.semantic import repository as semantic_repo
 from cohortsplit.semantic.crawl import CRAWL_RUN_LOCK_KEY, CrawlEnvironment, get_crawl_environment
 from cohortsplit.semantic.provider import SemanticContextProvider
 from cohortsplit.warehouse import PostgresWarehouseAdapter, ReadOnlyExecutor
@@ -300,3 +301,54 @@ def test_crawl_uses_role_export_grants(
     orders = tables[f"{scratch.schema}.orders"]
     assert next(c for c in carts["columns"] if c["name"] == "status")["sample_values"] == []
     assert next(c for c in orders["columns"] if c["name"] == "status")["sample_values"]
+
+
+def test_crawl_version_is_recorded_atomically_with_the_swap(
+    analyst: ApiClient,
+    engine: Engine,
+    scratch: ScratchWarehouse,
+    scratch_env: CrawlEnvironment,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review fix (S3): the crawl's content and its history row commit together, so the
+    history can neither miss a crawl nor credit its change to a later edit."""
+    crawl(analyst)
+    docs_before = analyst.get("/api/semantic/docs").json()["tables"]
+    version_before = version(analyst)
+    history_before = analyst.get("/api/semantic/versions").json()["total"]
+    scratch.admin("ALTER TABLE {s}.orders DROP COLUMN status")
+
+    def history_down(*args: Any, **kwargs: Any) -> bool:
+        raise RuntimeError("version history unavailable")
+
+    monkeypatch.setattr(semantic_repo, "record_version_if_changed", history_down)
+    response = analyst.post(RUNS)
+
+    assert response.status_code == 502, response.text
+    assert error_code(response) == "crawl_failed"
+    assert analyst.get("/api/semantic/docs").json()["tables"] == docs_before
+    assert version(analyst) == version_before
+    assert analyst.get("/api/semantic/versions").json()["total"] == history_before
+
+    monkeypatch.undo()
+    body = crawl(analyst)  # the lock was released after the failure
+
+    [latest, *_] = analyst.get("/api/semantic/versions").json()["items"]
+    assert (latest["cause"], latest["target"]) == ("crawler.run", f"crawl_run:{body['id']}")
+    assert latest["version"] == body["semantic_version"] == version(analyst) != version_before
+
+
+def test_lock_is_released_after_a_failed_crawl(
+    app: FastAPI,
+    analyst: ApiClient,
+    scratch_env: CrawlEnvironment,
+    warehouse_ro_dsn: str,
+) -> None:
+    app.dependency_overrides[get_crawl_environment] = lambda: environment(
+        warehouse_ro_dsn, ("cs_schema_that_does_not_exist",)
+    )
+    assert analyst.post(RUNS).status_code == 502
+
+    app.dependency_overrides[get_crawl_environment] = lambda: scratch_env
+
+    assert crawl(analyst)["status"] == "succeeded"

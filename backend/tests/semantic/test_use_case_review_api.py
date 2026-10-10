@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
-from tests.auth.helpers import ApiClient, FakeClock, error_code
+from tests.auth.helpers import ApiClient, FakeClock, error_code, make_role
 from tests.semantic.helpers import (
     client_with,
     first_pending,
@@ -285,3 +285,46 @@ def test_edited_use_case_survives_recrawl_and_its_template_is_not_regenerated(
     assert [(u.id, u.origin, u.status, u.nl_request) for u in same_template] == [
         (target.id, "human", "confirmed", "Edited by a human")
     ]
+
+
+def grant_country_export(db: Session, clock: FakeClock) -> None:
+    make_role(db, "Contact", ["cohort.export"], ["public.addresses.country_code"], now=clock.now)
+
+
+def test_generated_use_case_with_a_now_forbidden_literal_is_masked_in_the_queue(
+    reviewer: ApiClient, engine: Engine, db: Session, clock: FakeClock, crawled: int
+) -> None:
+    """Review fix (S7): the admin page must not show sample literals today's policy forbids."""
+    target = use_case_by_template(engine, "from_country")
+    plain = use_case_by_template(engine, "registered_recently")
+    grant_country_export(db, clock)
+
+    items = {i["id"]: i for i in queue(reviewer)}
+
+    masked = items[target.id]
+    assert masked["withheld"]
+    assert masked["nl_request"] is None
+    assert masked["spec"] is None
+    assert "KZ" not in str(masked)
+    assert items[plain.id]["withheld"] is None
+    assert items[plain.id]["nl_request"] == plain.nl_request
+
+
+def test_withheld_use_case_cannot_be_confirmed_but_can_be_rejected_or_rewritten(
+    reviewer: ApiClient, engine: Engine, db: Session, clock: FakeClock, crawled: int
+) -> None:
+    target = use_case_by_template(engine, "from_country")
+    grant_country_export(db, clock)
+
+    response = reviewer.post(f"{PATH}/{target.id}/confirm")
+
+    assert response.status_code == 409
+    assert error_code(response) == "use_case_withheld"
+    assert use_case_status(engine, target.id) == "pending_review"
+    assert reviewer.post(f"{PATH}/{target.id}/reject").status_code == 200
+    rewrite = {
+        "nl_request": "Users with an address",
+        "spec": spec_with_filter("public.orders.status", "paid"),
+    }
+    assert reviewer.put(f"{PATH}/{target.id}", json=rewrite).status_code == 200
+    assert use_case_status(engine, target.id) == "confirmed"

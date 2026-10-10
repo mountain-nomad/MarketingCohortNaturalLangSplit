@@ -8,10 +8,11 @@ from fastapi import FastAPI
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from cohortsplit.auth.crawler_integration import RoleExportGrants
 from cohortsplit.crawler.sampling import NoExportGrants
 from cohortsplit.crawler.settings import CrawlerSettings
 from cohortsplit.semantic.provider import SemanticContextProvider, current_semantic_version
-from tests.auth.helpers import ApiClient, FakeClock
+from tests.auth.helpers import ApiClient, FakeClock, make_role
 from tests.semantic.helpers import (
     PURCHASE,
     SEMANTIC_PERMISSIONS,
@@ -170,3 +171,45 @@ def test_provider_reports_the_same_version(analyst: ApiClient, engine: Engine) -
 
     assert provider.current_semantic_version() == version(analyst)
     assert provider.snapshot().semantic_version == version(analyst)
+
+
+def test_export_grant_change_changes_the_version_everywhere(
+    analyst: ApiClient, engine: Engine, db: Session, clock: FakeClock
+) -> None:
+    """Review fix: the version identifies the context the LLM sees, including which samples
+    today's policy exposes (a newly export-granted column's samples disappear)."""
+    seed_crawl(engine)
+    before = version(analyst)
+
+    make_role(db, "Contact", ["cohort.export"], ["public.orders.status"], now=clock.now)
+
+    after = version(analyst)
+    assert after != before
+    assert version(analyst) == after  # stable on re-read
+    with Session(engine) as fresh:
+        assert current_semantic_version(fresh).version == after
+    provider = SemanticContextProvider(
+        sessionmaker(engine),
+        crawler_settings=CrawlerSettings(),
+        export_grants=RoleExportGrants(sessionmaker(engine)),
+    )
+    assert provider.snapshot().semantic_version == after
+    assert provider.current_semantic_version() == after
+
+
+def test_recorded_version_matches_reread_for_float_literals(
+    analyst: ApiClient, engine: Engine
+) -> None:
+    """Review fix: the history row is computed from stored (JSONB round-tripped) content."""
+    seed_crawl(engine)
+    entry = {
+        "key": "big_spender",
+        "definition": {
+            "kind": "metric",
+            "table": "public.orders",
+            "filters": [{"column": "public.orders.grand_total", "operator": ">", "value": 1e20}],
+        },
+    }
+    assert analyst.post(ENTRIES, json=entry).status_code == 201
+
+    assert history(analyst)["items"][0]["version"] == version(analyst)
