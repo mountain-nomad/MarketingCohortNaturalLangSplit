@@ -133,11 +133,14 @@ turns crawler output into reviewed business meaning:
    `status_semantics`, `time_window`, `exclusion` and `canonical_user_id`
    (demo: `public.users.user_id`). Every table/column must exist in the latest crawl.
 4. **Use cases** — with `use_case.review`, confirm, edit (becomes human-authored and
-   confirmed) or reject generated examples; `needs_rereview` items come first.
+   confirmed) or reject generated examples; `needs_rereview` items come first. A
+   generated example whose value comes from a column the sampling policy no longer
+   permits (e.g. export-granted since the crawl) is shown as *Content withheld* and
+   can only be rewritten or rejected.
 
 Only confirmed use cases, business context, raw schema metadata and policy-permitted
-samples are ever handed to the cohort assistant. Every content change produces a new
-**semantic version** (`GET /api/semantic/version`, history at
+samples are ever handed to the cohort assistant. Every change to that context (including
+a sampling-policy change that hides samples) produces a new **semantic version** (`GET /api/semantic/version`, history at
 `/api/semantic/versions`); saving identical content keeps it. Details and rulings:
 [`docs/decisions/0002-semantic-context-rulings.md`](docs/decisions/0002-semantic-context-rulings.md).
 

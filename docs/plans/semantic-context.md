@@ -109,7 +109,7 @@ def compute_semantic_version(entries: Iterable[EntryContent], confirmed: Iterabl
 
 Canonical JSON (sorted keys, compact, UTF-8) with no ids, timestamps or authors:
 - business context: `{key, kind, synonyms, description, definition}` sorted by key;
-- confirmed use cases: `{nl_request, spec, spec_version}` sorted by their canonical JSON (origin/key/ids excluded);
+- confirmed (non-withheld) use cases: `{nl_request, spec, spec_version}` sorted by their canonical JSON (origin/key/ids excluded);
 - generated docs: `{doc_key, kind, content}` of every `origin='generated'` doc sorted by `(doc_key, kind)`.
 `version = sha256({"format":1,"business_context":h1,"confirmed_use_cases":h2,"generated_docs":h3})`.
 
@@ -117,7 +117,8 @@ Canonical JSON (sorted keys, compact, UTF-8) with no ids, timestamps or authors:
 
 ```python
 # cohortsplit.semantic.provider
-def current_semantic_version(db: Session) -> SemanticVersion
+def current_semantic_version(db: Session, crawler_settings: CrawlerSettings | None = None) -> SemanticVersion
+    # covers today's sampling policy: settings (default: environment) + export grants read in db
 
 class SemanticContextProvider:
     def __init__(self, session_factory: sessionmaker[Session], *, crawler_settings: CrawlerSettings,
@@ -137,11 +138,12 @@ class SemanticContextProvider:
     canonical_user_id: str | None
     business_context: tuple[PromptBusinessContext, ...]     # only entries whose references resolve
     stale_business_context: tuple[str, ...]                 # keys left out (missing references)
-    confirmed_use_cases: tuple[PromptUseCase, ...]          # status == confirmed only
+    confirmed_use_cases: tuple[PromptUseCase, ...]          # status == confirmed, not withheld
     tables: tuple[PromptTable, ...]                         # raw schema metadata + samples
+    withheld_use_cases: tuple[int, ...]                     # generated, literal now policy-forbidden (S7)
 ```
 
-BR-7: pending, rejected and `needs_rereview` use cases, human/generated free-text docs and generation notes are never in the snapshot. Samples are re-checked against the **current** sampling policy (sampling switch, denylist, export grants): a sample stored before a grant was added is not exposed (closes crawler R2 gap for prompts and the docs view).
+BR-7: pending, rejected and `needs_rereview` use cases, human/generated free-text docs and generation notes are never in the snapshot. Samples are re-checked against the **current** sampling policy (sampling switch, denylist, export grants): a sample stored before a grant was added is not exposed (closes crawler R2 gap for prompts and the docs view). Generated use cases whose literals that policy now forbids are withheld (S7). The semantic version is computed from exactly the snapshot content (S3).
 
 ### HTTP API
 
@@ -154,8 +156,8 @@ Errors use the existing `{"error": {"code", "message", ...}}` shape. All endpoin
 | `POST /api/semantic/business-context` | `semantic_context.edit` | 201; 409 `business_context_key_taken` / `term_conflict` / `canonical_user_id_exists` / `schema_inventory_unavailable`; 422 `invalid_reference` (`problems`) / `validation_error` |
 | `PUT /api/semantic/business-context/{key}` | `semantic_context.edit` | full replace (key immutable); 404 |
 | `DELETE /api/semantic/business-context/{key}` | `semantic_context.edit` | 204; 404 |
-| `GET /api/semantic/use-cases` | `semantic_context.read` | `?status=`; items incl. origin, status, notes, reviewer |
-| `POST /api/semantic/use-cases/{id}/confirm` | `use_case.review` | from pending_review / needs_rereview / rejected; references must resolve (422 `invalid_reference`); 409 `invalid_transition` |
+| `GET /api/semantic/use-cases` | `semantic_context.read` | `?status=`; items incl. origin, status, notes, reviewer, `withheld` (reason; request/spec then null) |
+| `POST /api/semantic/use-cases/{id}/confirm` | `use_case.review` | from pending_review / needs_rereview / rejected; references must resolve (422 `invalid_reference`); 409 `invalid_transition`; 409 `use_case_withheld` (S7) |
 | `POST /api/semantic/use-cases/{id}/reject` | `use_case.review` | from pending_review / needs_rereview / confirmed; optional `note` |
 | `PUT /api/semantic/use-cases/{id}` | `use_case.review` | `{nl_request, spec}` → `origin=human`, `status=confirmed`; spec validated as draft-0 + references |
 | `GET /api/semantic/version` | `semantic_context.read` | current version + components |

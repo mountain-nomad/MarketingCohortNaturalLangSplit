@@ -39,10 +39,14 @@ BR-1 says the admin configures it. It is the single `canonical_user_id` entry (4
 `version = sha256(canonical JSON {format: 1, business_context, confirmed_use_cases, generated_docs})`, each component the SHA-256 of canonical JSON (sorted keys, compact, UTF-8) of:
 
 - business context `{key, kind, synonyms, description, definition}` sorted by key;
-- **confirmed** use cases `{nl_request, spec, spec_version}` sorted by canonical JSON (ids, origin, reviewer and notes excluded);
-- every generated doc `{doc_key, kind, content}` sorted by `(doc_key, kind)`.
+- **confirmed, non-withheld** use cases `{nl_request, spec, spec_version}` sorted by canonical JSON (ids, origin, reviewer and notes excluded);
+- every generated doc `{doc_key, kind, content}` sorted by `(doc_key, kind)`, with every stored sample value and key example that **today's sampling policy** forbids removed (S7).
 
-It is computed from stored content, never cached, so it changes only when that content changes (identical saves, unchanged re-crawls and pending suggestions do not change it). The generated-docs component hashes the stored docs rather than the latest run's `content_hash`, so scoped crawls (`COHORTSPLIT_CRAWLER_SCHEMAS`) are covered too. `semantic_versions` keeps a history row (version, components, cause, target, actor, time) whenever a change produces a version different from the last recorded one; edits, review decisions, API crawls and CLI crawls all record. Edits, decisions and crawl swaps are serialized by one transaction-scoped advisory lock.
+The version therefore identifies exactly the context `SemanticContextProvider.snapshot()` exposes (one function, `snapshot.effective_version`, used by the snapshot, the service, `GET /api/semantic/version` and `current_semantic_version`). When the policy still permits everything stored, the filtered docs equal the stored docs, so the value is the plain stored-content hash. It is computed from stored content (re-read after the write, so JSONB round trips cannot fork it), never cached, so identical saves, unchanged re-crawls and pending suggestions do not change it. The generated-docs component hashes the stored docs rather than the latest run's `content_hash`, so scoped crawls (`COHORTSPLIT_CRAWLER_SCHEMAS`) are covered too.
+
+`semantic_versions` keeps a history row (version, components, cause, target, actor, time) whenever an edit, review decision, API crawl or CLI crawl produces a version different from the last recorded one. A crawl's row is written **inside the swap transaction** (`CrawlStore(after_swap=CrawlVersionRecorder(...))`), so the content and its history row commit together or not at all. Edits, decisions and crawl swaps are serialized by one transaction-scoped advisory lock, so history is linear.
+
+A change of the sampling policy alone (an export grant, the denylist or the sampling switch) changes the version immediately but writes no history row by itself; the next recorded change carries it. `GET /api/semantic/version` (and the version stamped from a snapshot) is authoritative.
 
 ## S4. Editing a use case confirms it
 
@@ -60,9 +64,11 @@ An entry whose references disappeared after a re-crawl is never auto-deleted or 
 
 Generated docs and the provider expose a stored sample only if the **current** sampling policy still permits it (sampling switch, denylist, export grants). A column export-granted after the last crawl is not exposed (closes the crawler R2 window for prompts and the admin page).
 
+The same applies to literals the crawler copied into a **generated** use case (a sampled value or a key example in an `=`, `!=`, `in` or `not_in` filter). If today's policy forbids that column's values — and the literal is not a CHECK-constraint value, which is schema metadata — the use case is **withheld**: left out of the snapshot (`withheld_use_cases` lists its id), shown in the review queue without its request and spec (`withheld` carries the reason), and confirming it is refused (409 `use_case_withheld`); it can still be rejected or rewritten. Human-authored use cases (`origin = human`, including edited ones) carry the reviewer's own literals and are never withheld. A literal whose column no longer exists is left to AC-26 re-review flagging.
+
 ## S8. Crawl API is synchronous and exclusive
 
-`POST /api/crawler/runs` crawls synchronously (MVP warehouses are small) and returns the run (201), 502 `crawl_failed` with the run id, or 409 `crawl_in_progress`. Exclusivity is a session-level PostgreSQL advisory lock held for the whole crawl, shared with `cohortsplit crawl`. Before touching the warehouse a sensitive `crawler.start` audit event is written (503 `audit_unavailable` if it cannot be); a refused concurrent request is audited as `crawler.start` / `denied`. The run itself is recorded by the existing `AuditCrawlHook` as `crawler.run` with the user as actor.
+`POST /api/crawler/runs` crawls synchronously (MVP warehouses are small) and returns the run (201), 502 `crawl_failed` with the run id, or 409 `crawl_in_progress`. Exclusivity is a session-level PostgreSQL advisory lock held for the whole crawl (released in `finally`, also after a failed crawl), shared with `cohortsplit crawl`. Before touching the warehouse a sensitive `crawler.start` audit event is written (503 `audit_unavailable` if it cannot be); a refused concurrent request is audited as `crawler.start` / `denied`. The run itself is recorded by the existing `AuditCrawlHook` as `crawler.run` with the user as actor.
 
 ## S9. Read permissions
 
