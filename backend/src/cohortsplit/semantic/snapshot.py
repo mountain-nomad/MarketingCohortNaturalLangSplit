@@ -85,6 +85,8 @@ class PromptColumn:
     comment: str | None
     allowed_values: tuple[str, ...] | None
     sample_values: tuple[str, ...]
+    # string | boolean | enum | numeric | datetime | other (crawler type category).
+    type_category: str = "other"
 
 
 @dataclass(frozen=True)
@@ -326,6 +328,7 @@ def _prompt_table(
                 else None
             ),
             sample_values=samples.get(str(c["name"]), ()),
+            type_category=str(c.get("type_category", "other")),
         )
         for c in content.get("columns") or ()
     )

@@ -223,9 +223,9 @@ def test_same_spec_and_version_compile_byte_identical() -> None:
 def test_compilation_independent_of_snapshot_order() -> None:
     docs = docs_for()
     shuffled = list(docs)
-    random.Random(7).shuffle(shuffled)
+    random.Random(7).shuffle(shuffled)  # noqa: S311 (test data order)
     entries = list(DEFAULT_ENTRIES)
-    random.Random(3).shuffle(entries)
+    random.Random(3).shuffle(entries)  # noqa: S311 (test data order)
     other = assemble_snapshot(
         entries=entries, use_cases=[], generated_docs=shuffled, policy=OPEN_POLICY
     )

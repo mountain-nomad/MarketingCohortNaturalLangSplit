@@ -12,6 +12,8 @@ dependencies = [
     "alembic==1.14.0",
     "psycopg[binary]==3.2.3",
     "argon2-cffi==25.1.0",
+    "sqlglot==26.12.1",
+    "httpx==0.28.1",
 ]
 
 [project.scripts]
@@ -20,7 +22,6 @@ cohortsplit = "cohortsplit.cli:main"
 [dependency-groups]
 dev = [
     "pytest==8.3.4",
-    "httpx==0.28.1",
     "ruff==0.8.4",
     "mypy==1.14.1",
 ]
