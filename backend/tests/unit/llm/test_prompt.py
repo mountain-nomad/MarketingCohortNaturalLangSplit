@@ -110,9 +110,21 @@ def test_prompt_never_contains_credentials_rows_or_pending_use_cases() -> None:
 
 
 def test_denylisted_columns_have_no_sample_values() -> None:
-    content = text(build_prompt(snapshot(), "x"))
+    messages = build_prompt(snapshot(), "x")
+    content = text(messages)
+    # Values appear in the JSON context as quoted strings; column names may contain them.
     for value in ("a@example.com", "+100", "tok", "1 Main St"):
-        assert value not in content
+        assert json.dumps(value) not in content, value
+    context = json.loads(messages[0].content.split("Context (JSON):\n", 1)[1])
+    columns = {c["column"]: c for t in context["tables"] for c in t["columns"]}
+    for denylisted in (
+        "public.users.email",
+        "public.users.phone",
+        "public.users.password_hash",
+        "public.carts.session_token",
+        "public.addresses.line1",
+    ):
+        assert "sample_values" not in columns[denylisted], denylisted
 
 
 def test_prompt_is_deterministic() -> None:

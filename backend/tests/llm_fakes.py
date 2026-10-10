@@ -1,6 +1,7 @@
 """Deterministic fake LLM and an in-process OpenAI-compatible HTTP stub (no network in CI)."""
 
 import json
+import socketserver
 import threading
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
@@ -9,6 +10,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from cohortsplit.llm.client import ChatMessage
+
+
+class LocalHTTPServer(ThreadingHTTPServer):
+    """``ThreadingHTTPServer`` without the reverse-DNS lookup in ``server_bind`` (slow on
+    some hosts)."""
+
+    def server_bind(self) -> None:
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = str(host)
+        self.server_port = int(port)
+
 
 Reply = str | Exception | Callable[[Sequence[ChatMessage]], str]
 
@@ -100,7 +113,7 @@ def openai_stub(content: str, *, prefix: str = "/v1") -> Iterator[OpenAIStub]:
         def log_message(self, format: str, *args: Any) -> None:
             return
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = LocalHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:

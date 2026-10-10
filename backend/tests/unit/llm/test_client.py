@@ -4,7 +4,7 @@ import json
 import logging
 import threading
 from collections.abc import Iterator
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 
 import httpx
 import pytest
@@ -20,7 +20,7 @@ from cohortsplit.llm.client import (
     safe_base_url,
 )
 from cohortsplit.llm.settings import LlmSettings, load_llm_settings
-from tests.llm_fakes import openai_stub
+from tests.llm_fakes import LocalHTTPServer, openai_stub
 
 API_KEY = "sk-test-secret-9f8e7d"
 MESSAGES = [ChatMessage("system", "You interpret cohorts."), ChatMessage("user", "Users from DE")]
@@ -180,7 +180,7 @@ def slow_server() -> Iterator[str]:
         def log_message(self, format: str, *args: object) -> None:
             return
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = LocalHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
