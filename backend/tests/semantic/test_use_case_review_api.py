@@ -7,6 +7,8 @@ from fastapi import FastAPI
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
+from cohortsplit.cohort_spec.draft import DraftCohortSpec
+from cohortsplit.cohort_spec.upgrade import upgrade_draft0
 from tests.auth.helpers import ApiClient, FakeClock, error_code, make_role
 from tests.semantic.helpers import (
     client_with,
@@ -185,8 +187,11 @@ def test_edit_makes_use_case_human_and_confirmed(
     assert body["origin"] == "human"
     assert body["status"] == "confirmed"
     assert body["nl_request"] == "Users with a delivered order"
-    assert body["spec"] == spec
-    assert body["spec_version"] == "draft-0"
+    # A draft-0 spec is accepted and stored upgraded to the real spec v1 (ruling C2).
+    assert body["spec"] == upgrade_draft0(DraftCohortSpec.model_validate(spec)).model_dump(
+        mode="json", exclude_none=True
+    )
+    assert body["spec_version"] == "1"
     assert body["key"] == target.use_case_key
     assert set(body["referenced_columns"]) == {
         "public.users.user_id",
@@ -212,6 +217,46 @@ def test_edit_fixes_a_needs_rereview_use_case(
     assert response.status_code == 200
     assert response.json()["status"] == "confirmed"
     assert response.json()["review_note"] is None
+
+
+def test_edit_accepts_a_v1_spec(reviewer: ApiClient, engine: Engine, crawled: int) -> None:
+    target = first_pending(engine)
+    spec = {
+        "spec_version": "1",
+        "entity": "user",
+        "where": {
+            "type": "related",
+            "table": "public.carts",
+            "path": [{"from_column": "public.users.user_id", "to_column": "public.carts.user_id"}],
+            "filters": [{"column": "public.carts.status", "operator": "=", "value": "abandoned"}],
+        },
+    }
+
+    response = reviewer.put(
+        f"{PATH}/{target.id}", json={"nl_request": "Users with an abandoned cart", "spec": spec}
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["spec"] == spec
+    assert response.json()["spec_version"] == "1"
+
+
+def test_edit_with_v1_spec_referencing_missing_column_refused(
+    reviewer: ApiClient, engine: Engine, crawled: int
+) -> None:
+    target = first_pending(engine)
+    spec = {
+        "spec_version": "1",
+        "where": {
+            "type": "attribute",
+            "filter": {"column": "public.users.nope", "operator": "=", "value": 1},
+        },
+    }
+
+    response = reviewer.put(f"{PATH}/{target.id}", json={"nl_request": "x", "spec": spec})
+
+    assert response.status_code == 422
+    assert error_code(response) == "invalid_reference"
 
 
 @pytest.mark.parametrize(

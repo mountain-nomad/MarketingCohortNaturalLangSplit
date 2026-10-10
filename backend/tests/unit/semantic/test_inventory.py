@@ -3,6 +3,7 @@
 from typing import Any
 
 from cohortsplit.cohort_spec.draft import DraftCohortSpec
+from cohortsplit.cohort_spec.v1 import CohortSpecV1
 from cohortsplit.semantic.context import BusinessContextIn
 from cohortsplit.semantic.inventory import (
     ReferenceProblem,
@@ -165,4 +166,25 @@ def test_check_spec_reports_missing_columns() -> None:
     assert check_spec(spec("public.orders.status"), inventory()) == ()
     assert check_spec(spec("public.orders.state"), inventory()) == (
         ReferenceProblem("public.orders.state", "unknown column"),
+    )
+
+
+def test_check_spec_accepts_v1_and_reports_missing_target_table() -> None:
+    ok = CohortSpecV1.model_validate(
+        {
+            "spec_version": "1",
+            "where": {
+                "type": "related",
+                "table": "public.orders",
+                "filters": [{"column": "public.orders.status", "operator": "=", "value": "x"}],
+            },
+        }
+    )
+    missing = CohortSpecV1.model_validate(
+        {"spec_version": "1", "where": {"type": "related", "table": "public.refunds"}}
+    )
+
+    assert check_spec(ok, inventory()) == ()
+    assert check_spec(missing, inventory()) == (
+        ReferenceProblem("public.refunds", "unknown table"),
     )
