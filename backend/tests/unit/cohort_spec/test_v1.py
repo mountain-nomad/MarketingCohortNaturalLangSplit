@@ -119,7 +119,11 @@ def test_entity_other_than_user_rejected() -> None:
         {"type": "sequence", "steps": []},
         {"type": "related", "table": "public.orders", "then": {"type": "related"}},
         # No SQL anywhere.
-        {"type": "attribute", "filter": {"column": "public.users.x", "operator": "=", "value": 1}, "sql": "1=1"},
+        {
+            "type": "attribute",
+            "filter": {"column": "public.users.x", "operator": "=", "value": 1},
+            "sql": "1=1",
+        },
         {"type": "sql", "sql": "SELECT 1"},
     ],
     ids=["sequence-node", "then-field", "sql-field", "sql-node"],

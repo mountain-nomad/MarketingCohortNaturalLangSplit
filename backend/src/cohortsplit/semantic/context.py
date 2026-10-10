@@ -21,7 +21,6 @@ checked against the latest crawl by :mod:`cohortsplit.semantic.inventory`.
 """
 
 import re
-import unicodedata
 from typing import Annotated, Literal, Self
 
 from pydantic import (
@@ -34,7 +33,13 @@ from pydantic import (
     model_validator,
 )
 
-from cohortsplit.cohort_spec.draft import QualifiedColumn, QualifiedTable
+from cohortsplit.cohort_spec.common import (
+    Filter,
+    QualifiedColumn,
+    QualifiedTable,
+    normalize_term,
+    table_of,
+)
 
 ENTRY_KINDS = (
     "term",
@@ -49,44 +54,11 @@ MAX_SYNONYMS = 50
 MAX_SYNONYM_LENGTH = 100
 MAX_DESCRIPTION_LENGTH = 4000
 MAX_FILTERS = 20
-MAX_IN_VALUES = 200
 MAX_MEANINGS = 100
-
-Scalar = str | int | float | bool
-Operator = Literal["=", "!=", ">", ">=", "<", "<=", "in", "not_in", "is_null", "is_not_null"]
-_LIST_OPERATORS = frozenset({"in", "not_in"})
-_NULL_OPERATORS = frozenset({"is_null", "is_not_null"})
 
 
 class _Model(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
-
-
-def table_of(column: str) -> str:
-    """``schema.table`` of a qualified ``schema.table.column``."""
-    return column.rsplit(".", 1)[0]
-
-
-class Filter(_Model):
-    """``column <operator> value`` with a literal value (never SQL)."""
-
-    column: QualifiedColumn
-    operator: Operator
-    value: Scalar | tuple[Scalar, ...] | None = None
-
-    @model_validator(mode="after")
-    def _value_matches_operator(self) -> Self:
-        if self.operator in _NULL_OPERATORS:
-            if self.value is not None:
-                raise ValueError(f"operator {self.operator} takes no value")
-        elif self.operator in _LIST_OPERATORS:
-            if not isinstance(self.value, tuple) or not self.value:
-                raise ValueError(f"operator {self.operator} needs a non-empty list of values")
-            if len(self.value) > MAX_IN_VALUES:
-                raise ValueError(f"at most {MAX_IN_VALUES} values")
-        elif self.value is None or isinstance(self.value, tuple):
-            raise ValueError(f"operator {self.operator} needs a single value")
-        return self
 
 
 def _filters_on(table: str, filters: tuple[Filter, ...], *columns: str | None) -> None:
@@ -163,11 +135,6 @@ Definition = Annotated[
     | CanonicalUserIdDefinition,
     Field(discriminator="kind"),
 ]
-
-
-def normalize_term(value: str) -> str:
-    """Trimmed, whitespace-collapsed, case-folded (NFKC) form of a business term."""
-    return " ".join(unicodedata.normalize("NFKC", value).split()).casefold()
 
 
 def _normalize_synonyms(values: tuple[str, ...]) -> tuple[str, ...]:
