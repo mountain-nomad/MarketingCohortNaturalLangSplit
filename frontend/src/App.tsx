@@ -13,6 +13,7 @@ import { ComingSoonTab } from './dashboard/ComingSoonTab.tsx'
 import { DashboardLayout, FirstTab, TabGate } from './dashboard/DashboardLayout.tsx'
 import { RolesTab } from './dashboard/RolesTab.tsx'
 import { UsersTab } from './dashboard/UsersTab.tsx'
+import { SemanticTab } from './semantic/SemanticTab.tsx'
 
 function Loading() {
   return <p className="muted center">Loading…</p>
@@ -150,15 +151,7 @@ export function App() {
                   />
                 ))}
               />
-              <Route
-                path="semantic"
-                element={tab('semantic', () => (
-                  <ComingSoonTab
-                    title="Semantic context"
-                    description="Business definitions, generated warehouse docs and use cases awaiting review."
-                  />
-                ))}
-              />
+              <Route path="semantic" element={tab('semantic', (me) => <SemanticTab me={me} />)} />
               <Route path="admin/users" element={tab('users', () => <UsersTab />)} />
               <Route path="admin/roles" element={tab('roles', () => <RolesTab />)} />
               <Route path="admin/audit" element={tab('audit', () => <AuditTab />)} />

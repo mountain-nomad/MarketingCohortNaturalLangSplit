@@ -31,3 +31,14 @@ ACCESS_DENIED = "access.denied"
 
 # Warehouse crawler runs (feature/warehouse-crawler, via AuditCrawlHook)
 CRAWLER_RUN = "crawler.run"
+# A crawl requested through the API: written (fail closed) before the warehouse is
+# touched, or as "denied" when another crawl is running. The run itself is CRAWLER_RUN.
+CRAWLER_START = "crawler.start"
+
+# Semantic context (feature/semantic-context): business-context edits, review decisions
+SEMANTIC_CONTEXT_CREATE = "semantic_context.create"
+SEMANTIC_CONTEXT_UPDATE = "semantic_context.update"
+SEMANTIC_CONTEXT_DELETE = "semantic_context.delete"
+USE_CASE_CONFIRM = "use_case.confirm"
+USE_CASE_REJECT = "use_case.reject"
+USE_CASE_EDIT = "use_case.edit"

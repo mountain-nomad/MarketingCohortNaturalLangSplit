@@ -72,6 +72,9 @@ example_use_cases = Table(
     Column("review_note", Text),
     Column("referenced_columns", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
     Column("crawl_run_id", BigInteger, ForeignKey("crawl_runs.id", ondelete="SET NULL")),
+    # Last review decision (migration 0004; the FK to users.id lives in the database).
+    Column("reviewed_by", BigInteger),
+    Column("reviewed_at", DateTime(timezone=True)),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     CheckConstraint(f"origin IN {ORIGINS}", name="example_use_cases_origin_check"),

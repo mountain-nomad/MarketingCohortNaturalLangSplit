@@ -4,7 +4,8 @@ Re-run rules (FR-2, AC-25 crawler half, AC-26):
 - generated docs are replaced wholesale; human docs are never touched;
 - generated ``pending_review`` use cases are replaced; generated use cases a human
   already reviewed (confirmed / rejected / needs_rereview) are kept and their key is
-  not regenerated; human use cases are never touched;
+  not regenerated; human use cases are never touched, and a template key held by a
+  human row (a reviewer edited the generated suggestion) is not regenerated either;
 - confirmed use cases (any origin) that reference a table/column that no longer
   exists in the crawled scope become ``needs_rereview`` with a note naming what is
   missing; their spec is left unchanged;
@@ -12,7 +13,7 @@ Re-run rules (FR-2, AC-25 crawler half, AC-26):
 """
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -25,8 +26,11 @@ from cohortsplit.crawler.catalog import WarehouseCatalog
 from cohortsplit.crawler.tables import crawl_runs, example_use_cases, semantic_docs
 from cohortsplit.crawler.use_cases import GeneratedUseCase, UseCaseGeneration, UseCaseStatus
 
-# Serializes concurrent swaps (transaction-scoped advisory lock).
+# Serializes concurrent swaps (transaction-scoped advisory lock). The semantic-context
+# service takes the same lock for edits and review decisions, so swaps, edits and the
+# semantic version history are serialized.
 _SWAP_LOCK_KEY = 0x435253574150  # "CRSWAP"
+SEMANTIC_CONTENT_LOCK_KEY = _SWAP_LOCK_KEY
 
 
 @dataclass(frozen=True)
@@ -68,6 +72,8 @@ class StoredUseCase:
     referenced_columns: tuple[str, ...]
     crawl_run_id: int | None
     updated_at: datetime
+    reviewed_by: int | None = None
+    reviewed_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -129,6 +135,8 @@ def _use_case(row: Row[Any]) -> StoredUseCase:
         referenced_columns=tuple(row.referenced_columns),
         crawl_run_id=row.crawl_run_id,
         updated_at=row.updated_at,
+        reviewed_by=row.reviewed_by,
+        reviewed_at=row.reviewed_at,
     )
 
 
@@ -154,9 +162,16 @@ def _missing_references(
     return tuple(missing)
 
 
+AfterSwap = Callable[[Connection, int], None]
+
+
 class CrawlStore:
-    def __init__(self, engine: Engine) -> None:
+    def __init__(self, engine: Engine, *, after_swap: AfterSwap | None = None) -> None:
+        """``after_swap(conn, run_id)`` runs inside every swap transaction, under the swap
+        lock, after the new content is written (e.g. to record the semantic version). If
+        it raises, the whole swap rolls back and the crawl fails."""
         self._engine = engine
+        self._after_swap = after_swap
 
     # -- runs ------------------------------------------------------------------------------
 
@@ -219,7 +234,9 @@ class CrawlStore:
             conn.execute(stale_docs)
             self._insert_docs(conn, run_id, catalog)
 
-            preserved = set(
+            # Keys a human already acted on: reviewed generated rows, and human rows (an
+            # edited suggestion keeps its template key and becomes origin=human).
+            reviewed = set(
                 conn.execute(
                     select(example_use_cases.c.use_case_key).where(
                         example_use_cases.c.origin == "generated",
@@ -227,6 +244,16 @@ class CrawlStore:
                     )
                 ).scalars()
             )
+            generated_keys = {u.key for u in generation.use_cases}
+            edited = set(
+                conn.execute(
+                    select(example_use_cases.c.use_case_key).where(
+                        example_use_cases.c.origin == "human",
+                        example_use_cases.c.use_case_key.in_(sorted(generated_keys)),
+                    )
+                ).scalars()
+            )
+            preserved = reviewed | edited
             conn.execute(
                 delete(example_use_cases).where(
                     example_use_cases.c.origin == "generated",
@@ -257,6 +284,8 @@ class CrawlStore:
                     },
                 )
             )
+            if self._after_swap is not None:
+                self._after_swap(conn, run_id)
         return SwapResult(
             inserted_use_cases=len(fresh), preserved_keys=preserved_keys, flagged=flagged
         )

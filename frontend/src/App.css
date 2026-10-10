@@ -531,3 +531,81 @@ td.actions,
   border-radius: var(--radius-sm);
   font-size: 0.88rem;
 }
+
+/* --- semantic context ---------------------------------------------------------------- */
+
+.subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 1rem 0 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.subtabs [role='tab'] {
+  margin-bottom: -1px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.subtabs [role='tab'][aria-selected='true'] {
+  background: var(--surface);
+  border-color: var(--border);
+  border-bottom-color: var(--surface);
+  font-weight: 600;
+}
+
+.code-block,
+textarea.code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+.code-block {
+  margin: 0.5rem 0;
+  padding: 0.6rem 0.75rem;
+  overflow-x: auto;
+  background: var(--sunken);
+  border-radius: var(--radius-sm);
+}
+
+.small {
+  font-size: 0.85rem;
+}
+
+.field.narrow {
+  max-width: 14rem;
+}
+
+.fk {
+  display: block;
+}
+
+.status {
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.status-confirmed,
+.status-succeeded {
+  color: var(--success);
+}
+
+.status-needs_rereview,
+.status-rejected,
+.status-failed {
+  color: var(--danger);
+}
+
+.use-case.needs-rereview,
+.entry.stale {
+  border-color: var(--danger);
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+
+.warning ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1.2rem;
+}

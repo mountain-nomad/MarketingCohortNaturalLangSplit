@@ -176,6 +176,29 @@ describe('Dashboard tabs follow effective permissions (AC-A23, AC-A24)', () => {
     expect(screen.getByText(/coming soon/i)).toBeInTheDocument()
   })
 
+  it('serves the Semantic context tab (no longer a placeholder)', async () => {
+    const calls = mockApi({
+      'GET /api/me': { body: me(['semantic_context.read']) },
+      'GET /api/semantic/version': { body: { version: 'f'.repeat(64), components: {} } },
+      'GET /api/semantic/docs': { body: { tables: [], latest_run: null } },
+    })
+    renderAt('/semantic')
+
+    expect(await screen.findByRole('heading', { name: 'Semantic context' })).toBeInTheDocument()
+    expect(screen.queryByText(/coming soon/i)).not.toBeInTheDocument()
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/semantic/docs')).toBe(true))
+  })
+
+  it('direct navigation to the Semantic context tab without permission calls no semantic API', async () => {
+    const calls = mockApi({ 'GET /api/me': { body: me(['cohort.create']) } })
+    renderAt('/semantic')
+
+    expect(await screen.findByText(/you don't have access to this page/i)).toBeInTheDocument()
+    expect(calls.some((c) => c.path.startsWith('/api/semantic') || c.path.startsWith('/api/crawler'))).toBe(
+      false,
+    )
+  })
+
   it('direct navigation to a hidden tab shows no content and calls no admin API', async () => {
     const calls = mockApi({ 'GET /api/me': { body: me(['cohort.create']) } })
     renderAt('/admin/users')
