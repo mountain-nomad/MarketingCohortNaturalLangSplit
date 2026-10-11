@@ -10,10 +10,10 @@ import type { TabId } from './auth/tabs.ts'
 import { NewCohortTab } from './cohort/NewCohortTab.tsx'
 import { AccountTab } from './dashboard/AccountTab.tsx'
 import { AuditTab } from './dashboard/AuditTab.tsx'
-import { ComingSoonTab } from './dashboard/ComingSoonTab.tsx'
 import { DashboardLayout, FirstTab, TabGate } from './dashboard/DashboardLayout.tsx'
 import { RolesTab } from './dashboard/RolesTab.tsx'
 import { UsersTab } from './dashboard/UsersTab.tsx'
+import { HistoryTab } from './history/HistoryTab.tsx'
 import { SemanticTab } from './semantic/SemanticTab.tsx'
 
 function Loading() {
@@ -140,12 +140,7 @@ export function App() {
               />
               <Route
                 path="history"
-                element={tab('history', () => (
-                  <ComingSoonTab
-                    title="History"
-                    description="Past cohort runs with their exact membership, ready to download again."
-                  />
-                ))}
+                element={tab('history', (me) => <HistoryTab me={me} />)}
               />
               <Route path="semantic" element={tab('semantic', (me) => <SemanticTab me={me} />)} />
               <Route path="admin/users" element={tab('users', () => <UsersTab />)} />

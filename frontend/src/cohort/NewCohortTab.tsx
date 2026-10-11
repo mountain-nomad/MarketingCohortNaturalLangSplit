@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { api, ApiError, errorMessage } from '../api/client.ts'
 import type { Me } from '../api/types.ts'
+import { SplitStep } from './SplitStep.tsx'
 import type { Clarification, Interpretation, InterpretResult, Preview, Rejection, RejectionReason } from './types.ts'
 
 const REASONS: Record<RejectionReason, string> = {
@@ -152,7 +153,7 @@ function PreviewCard({ preview }: { preview: Preview }) {
   )
 }
 
-/** New cohort: request -> interpretation / clarification / rejection -> confirm -> preview. */
+/** New cohort: request -> interpretation / clarification / rejection -> confirm -> preview -> split. */
 export function NewCohortTab({ me }: { me: Me }) {
   const [request, setRequest] = useState('')
   const [result, setResult] = useState<InterpretResult | null>(null)
@@ -238,6 +239,9 @@ export function NewCohortTab({ me }: { me: Me }) {
       {result?.kind === 'clarification' && <ClarificationCard result={result} />}
       {result?.kind === 'rejection' && <RejectionCard result={result} />}
       {preview && <PreviewCard preview={preview} />}
+      {preview?.split_export_enabled && preview.prepared_cohort_id && (
+        <SplitStep key={preview.prepared_cohort_id} me={me} preview={preview} />
+      )}
     </section>
   )
 }

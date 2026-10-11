@@ -10,6 +10,8 @@ export interface Me {
   is_admin: boolean
   roles: RoleRef[]
   permissions: string[]
+  /** Extra columns the user may export right now (UX hint; every download re-checks). */
+  export_columns?: string[]
 }
 
 export interface AdminUser {

@@ -116,6 +116,50 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
   return (await response.json()) as T
 }
 
+function filenameFrom(disposition: string | null, fallback: string): string {
+  const match = disposition?.match(/filename="([^"]+)"/)
+  return match?.[1] ?? fallback
+}
+
+/**
+ * POST `body` to `path` and save the returned file (e.g. an export ZIP) in the browser.
+ * Errors are thrown as ApiError like `api`. Returns the saved file name.
+ */
+export async function downloadFile(path: string, body: unknown, fallbackName = 'download.zip'): Promise<string> {
+  const headers: Record<string, string> = { Accept: 'application/zip, application/json', 'Content-Type': 'application/json' }
+  const token = readCsrfToken()
+  if (token) {
+    headers['X-CSRF-Token'] = token
+  }
+  const response = await fetch(path, {
+    method: 'POST',
+    headers,
+    credentials: 'same-origin',
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    const error = await errorFrom(response)
+    if (error.code === 'not_authenticated' || error.code === 'password_change_required') {
+      for (const listener of listeners) listener(error.code)
+    }
+    throw error
+  }
+  const filename = filenameFrom(response.headers.get('Content-Disposition'), fallbackName)
+  const url = URL.createObjectURL(await response.blob())
+  try {
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    link.rel = 'noopener'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+  return filename
+}
+
 export function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message
   return 'Something went wrong. Check your connection and try again.'
