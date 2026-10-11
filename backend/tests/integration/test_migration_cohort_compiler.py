@@ -82,10 +82,13 @@ def _clear_use_cases(engine: Engine) -> None:
         conn.execute(text("DELETE FROM example_use_cases"))
 
 
-def test_single_head_is_the_cohort_compiler_revision(cfg: Config) -> None:
+def test_cohort_compiler_revision_is_on_the_single_chain(cfg: Config) -> None:
+    # 0006_experiment_split follows this revision; the head itself is pinned by the
+    # newest migration's test.
     script = ScriptDirectory.from_config(cfg)
 
-    assert script.get_heads() == [REVISION]
+    assert len(script.get_heads()) == 1
+    assert REVISION in {rev.revision for rev in script.walk_revisions()}
     revision = script.get_revision(REVISION)
     assert revision is not None
     assert revision.down_revision == "0004_semantic_context"
