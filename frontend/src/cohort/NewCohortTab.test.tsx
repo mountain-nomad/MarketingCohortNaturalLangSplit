@@ -66,8 +66,8 @@ test('shows the interpretation and previews only after explicit confirmation', a
 
   expect(await screen.findByText(interpretation.readable)).toBeInTheDocument()
   expect(calls.filter((c) => c.path === '/api/cohorts/preview')).toHaveLength(0)
-  expect(calls[0].body).toEqual({ nl_request: REQUEST })
-  expect(calls[0].headers['x-csrf-token']).toBe('csrf-1')
+  expect(calls[0]?.body).toEqual({ nl_request: REQUEST })
+  expect(calls[0]?.headers['x-csrf-token']).toBe('csrf-1')
 
   await user.click(screen.getByRole('button', { name: /confirm and preview/i }))
 

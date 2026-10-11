@@ -7,6 +7,7 @@ import { LoginPage } from './auth/LoginPage.tsx'
 import { SessionProvider } from './auth/SessionProvider.tsx'
 import { useSession } from './auth/session.ts'
 import type { TabId } from './auth/tabs.ts'
+import { NewCohortTab } from './cohort/NewCohortTab.tsx'
 import { AccountTab } from './dashboard/AccountTab.tsx'
 import { AuditTab } from './dashboard/AuditTab.tsx'
 import { ComingSoonTab } from './dashboard/ComingSoonTab.tsx'
@@ -135,12 +136,7 @@ export function App() {
               <Route path="account" element={tab('account', (me) => <AccountTab me={me} />)} />
               <Route
                 path="cohorts/new"
-                element={tab('new-cohort', () => (
-                  <ComingSoonTab
-                    title="New cohort"
-                    description="Describe an audience in plain English, review the interpretation, preview it, and split it into test and control groups."
-                  />
-                ))}
+                element={tab('new-cohort', (me) => <NewCohortTab me={me} />)}
               />
               <Route
                 path="history"
