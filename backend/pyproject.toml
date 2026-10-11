@@ -50,6 +50,8 @@ select = ["E", "F", "W", "I", "B", "UP", "S", "N", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S105", "S106", "S603"]
+# Hand-written reference SQL for the acceptance tests (constants only).
+"tests/cohort_reference/**" = ["S101", "S105", "S106", "S603", "S608"]
 
 [tool.mypy]
 python_version = "3.12"
