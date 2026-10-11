@@ -345,6 +345,7 @@ def test_expired_prepared_cohort_is_not_found(
     install_environment(app, executor=ExportExecutor(members=MEMBERS))
     prepared = prepare(client)
     clock.advance(minutes=24 * 60 + 1)
+    assert client.login("marketer@example.com").status_code == 200  # the session idled out
 
     response = split(client, prepared)
 

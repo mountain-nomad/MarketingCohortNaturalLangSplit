@@ -88,7 +88,10 @@ def test_admin_passes_every_permission_check(
 
     assert admin_client.get("/api/runs").status_code == 200
     assert admin_client.get(f"/api/runs/{run['id']}").status_code == 200
-    downloaded = admin_client.post(f"/api/runs/{run['id']}/download", json={})
+    # The default fake members all land in control for this key: confirm the empty group.
+    downloaded = admin_client.post(
+        f"/api/runs/{run['id']}/download", json={"confirm_empty_group": True}
+    )
     assert downloaded.status_code == 200
     split = admin_client.post("/api/runs", json=BODY)
     assert split.status_code == 404  # unknown prepared cohort: past the permission check

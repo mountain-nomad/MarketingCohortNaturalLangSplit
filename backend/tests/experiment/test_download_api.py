@@ -198,10 +198,15 @@ def test_ac21a_redownload_membership_identical_even_if_warehouse_changes(
     env = install_environment(app, executor=phone_executor())
     run = split_ok(client, export_columns=[PHONE])
     original = read_export(download(client, run["id"]))
-    membership_queries = len(env.executor.cohort_statements())
+
+    def membership_queries() -> int:
+        return sum(1 for s in env.executor.statements if s.sql.startswith("SELECT DISTINCT u."))
+
+    before = membership_queries()
 
     env.executor.members = [1, 2, 999]  # the cohort definition now matches other users
     clock.advance(days=10)
+    assert client.login("marketer@example.com").status_code == 200  # the session idled out
     again = read_export(download(client, run["id"]))
 
     assert again.ids("test") == original.ids("test")
@@ -209,7 +214,7 @@ def test_ac21a_redownload_membership_identical_even_if_warehouse_changes(
     assert again.manifest["counts"] == original.manifest["counts"]
     assert again.manifest["export"]["redownload"] is True
     # Runs are never re-executed: no cohort query ran for the re-download.
-    assert len(env.executor.cohort_statements()) == membership_queries
+    assert membership_queries() == before
 
 
 def test_users_missing_from_the_warehouse_keep_their_row_and_are_counted(
