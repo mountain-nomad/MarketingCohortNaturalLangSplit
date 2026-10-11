@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
-import { api, downloadFile, errorMessage } from '../api/client.ts'
+import { api, ApiError, downloadFile, errorMessage } from '../api/client.ts'
+import { ID_ONLY_RETRY } from './exportErrors.ts'
 import type { Me } from '../api/types.ts'
 import type { ExperimentType, Preview, SplitResult } from './types.ts'
 
@@ -25,22 +26,21 @@ function RunResult({ result, canExport }: { result: SplitResult; canExport: bool
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState<string | null>(null)
+  const [idsOnlyOffered, setIdsOnlyOffered] = useState(false)
   const needsConfirmation = result.requires_empty_group_confirmation
 
-  async function download() {
+  async function download(idsOnly = false) {
     setBusy(true)
     setError(null)
     setSaved(null)
+    setIdsOnlyOffered(false)
+    const body: Record<string, unknown> = { confirm_empty_group: needsConfirmation && confirmed }
+    if (idsOnly) body.columns = []
     try {
-      setSaved(
-        await downloadFile(
-          `/api/runs/${result.id}/download`,
-          { confirm_empty_group: needsConfirmation && confirmed },
-          `cohortsplit_${result.experiment_key}.zip`,
-        ),
-      )
+      setSaved(await downloadFile(`/api/runs/${result.id}/download`, body, `cohortsplit_${result.experiment_key}.zip`))
     } catch (failure) {
       setError(errorMessage(failure))
+      setIdsOnlyOffered(!idsOnly && failure instanceof ApiError && ID_ONLY_RETRY.has(failure.code))
     } finally {
       setBusy(false)
     }
@@ -84,6 +84,11 @@ function RunResult({ result, canExport }: { result: SplitResult; canExport: bool
           {error && (
             <div className="error" role="alert">
               <p>{error}</p>
+              {idsOnlyOffered && (
+                <button type="button" disabled={busy} onClick={() => void download(true)}>
+                  Download user ids only
+                </button>
+              )}
             </div>
           )}
         </>

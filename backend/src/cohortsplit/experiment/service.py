@@ -343,7 +343,7 @@ class ExperimentService:
                 ctx,
                 actions.COHORT_SPLIT,
                 "success",
-                target_type="experiment_run",
+                target_type="cohort_run",
                 target_id=run.id,
                 metadata={**base, "export_columns": columns, "counts": counts},
             ),

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, ApiError, downloadFile, errorMessage } from '../api/client.ts'
 import type { Me } from '../api/types.ts'
+import { ID_ONLY_RETRY } from '../cohort/exportErrors.ts'
 import type { RunList, RunSummary } from '../cohort/types.ts'
 
 const PAGE_SIZE = 50
@@ -54,7 +55,7 @@ export function HistoryTab({ me }: { me: Me }) {
       setProblem({
         run,
         message: errorMessage(failure),
-        columnsRefused: failure instanceof ApiError && failure.code === 'export_column_denied',
+        columnsRefused: failure instanceof ApiError && ID_ONLY_RETRY.has(failure.code),
         options,
       })
     } finally {

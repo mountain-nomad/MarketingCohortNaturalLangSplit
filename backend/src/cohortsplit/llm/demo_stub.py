@@ -128,7 +128,13 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path != f"{PREFIX}/chat/completions":
             self._send(404, {"error": {"message": "not found"}})
             return
-        length = min(int(self.headers.get("Content-Length") or 0), _MAX_BODY)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = -1
+        if not 0 <= length <= _MAX_BODY:
+            self._send(400, {"error": {"message": "invalid Content-Length"}})
+            return
         try:
             body = json.loads(self.rfile.read(length) or b"{}")
             if not isinstance(body, dict):
