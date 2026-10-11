@@ -168,12 +168,17 @@ describe('Dashboard tabs follow effective permissions (AC-A23, AC-A24)', () => {
     ])
   })
 
-  it('shows placeholder content for tabs delivered by later features', async () => {
-    mockApi({ 'GET /api/me': { body: me(['cohort.create']) } })
+  it('serves the History tab (no longer a placeholder)', async () => {
+    const calls = mockApi({
+      'GET /api/me': { body: me(['cohort.create']) },
+      'GET /api/runs': { body: { items: [], total: 0, limit: 50, offset: 0, scope: 'own' } },
+    })
     renderAt('/history')
 
     expect(await screen.findByRole('heading', { name: 'History' })).toBeInTheDocument()
-    expect(screen.getByText(/coming soon/i)).toBeInTheDocument()
+    expect(await screen.findByText(/no runs yet/i)).toBeInTheDocument()
+    expect(screen.queryByText(/coming soon/i)).not.toBeInTheDocument()
+    expect(calls.some((c) => c.path === '/api/runs')).toBe(true)
   })
 
   it('serves the New cohort tab (no longer a placeholder)', async () => {
