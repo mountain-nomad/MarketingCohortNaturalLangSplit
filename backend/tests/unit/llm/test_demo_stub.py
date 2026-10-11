@@ -2,6 +2,7 @@
 answers the documented demo requests with the spec a correct interpreter would produce,
 so the campaign flow can be tried without a model. Opt-in; never the default provider."""
 
+import socket
 import threading
 from collections.abc import Iterator
 from typing import Any
@@ -126,3 +127,19 @@ class _Direct:
 
     def complete(self, messages: Any) -> str:
         return demo_reply(list(messages))
+
+
+@pytest.mark.parametrize("length", ["-5", "abc", "99999999999"])
+def test_bad_content_length_is_refused(stub_url: str, length: str) -> None:
+    host_port = stub_url.removeprefix("http://").removesuffix("/v1")
+    host, port = host_port.split(":")
+    request = (
+        f"POST /v1/chat/completions HTTP/1.1\r\nHost: {host_port}\r\n"
+        f"Content-Length: {length}\r\nConnection: close\r\n\r\n{{}}"
+    ).encode()
+    with socket.create_connection((host, int(port)), timeout=5) as conn:
+        conn.sendall(request)
+        conn.shutdown(socket.SHUT_WR)
+        status_line = conn.makefile("rb").readline().decode()
+
+    assert " 400 " in status_line

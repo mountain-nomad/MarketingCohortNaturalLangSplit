@@ -87,7 +87,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-async function toPreview(handlers: Record<string, MockResponse>, permissions = EXPORTER, exportColumns: string[] = []) {
+async function toPreview(handlers: Parameters<typeof mockApi>[0], permissions = EXPORTER, exportColumns: string[] = []) {
   setCsrfCookie('csrf-1')
   const calls = mockApi({
     'POST /api/cohorts/interpret': { body: interpretation },
@@ -295,4 +295,24 @@ test('an empty cohort offers no split', async () => {
 
   await screen.findByText(/nothing to split or export/i)
   expect(screen.queryByRole('region', { name: /split into test and control/i })).not.toBeInTheDocument()
+})
+
+test('after a refused column the result offers a user-id-only download', async () => {
+  let attempt = 0
+  const { user, calls, split } = await toPreview({
+    'POST /api/runs': { status: 201, body: run({ export_columns: [PHONE] }) },
+    [`POST /api/runs/${'f'.repeat(32)}/download`]: () =>
+      ++attempt === 1 ? apiError(403, 'export_column_denied', 'None of your roles is granted export of: public.users.phone.') : zip,
+  })
+
+  await user.type(within(split).getByLabelText(/experiment key/i), 'k')
+  await user.click(within(split).getByRole('button', { name: /^split$/i }))
+  const result = await screen.findByRole('region', { name: /split result/i })
+  await user.click(within(result).getByRole('button', { name: /download zip/i }))
+  await screen.findByRole('alert')
+  await user.click(within(result).getByRole('button', { name: /download user ids only/i }))
+
+  await within(result).findByText(/downloaded/i)
+  const bodies = calls.filter((c) => c.path.endsWith('/download')).map((c) => c.body)
+  expect(bodies).toEqual([{ confirm_empty_group: false }, { columns: [], confirm_empty_group: false }])
 })

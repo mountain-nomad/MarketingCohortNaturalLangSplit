@@ -132,6 +132,37 @@ test('a refused column offers a user-id-only download', async () => {
   expect(saved).toEqual(['cohortsplit_key_a.zip'])
 })
 
+test.each([
+  [409, 'canonical_user_id_changed', 'The canonical user identifier changed since this run was made.'],
+  [422, 'export_column_unsupported', 'Only columns of the user table public.users can be exported: public.users.phone.'],
+])('a %s %s also offers a user-id-only download (ruling E11)', async (status, code, message) => {
+  let attempt = 0
+  const { calls, user } = setup({
+    'GET /api/runs': list([run(A)]),
+    [`POST /api/runs/${A}/download`]: () => (++attempt === 1 ? apiError(status, code, message) : zip),
+  })
+
+  await user.click(within(await row('key_a')).getByRole('button', { name: /download again/i }))
+  expect(await screen.findByRole('alert')).toHaveTextContent(message)
+  await user.click(screen.getByRole('button', { name: /download user ids only/i }))
+
+  await screen.findByText(/downloaded/i)
+  const bodies = calls.filter((c) => c.path === `/api/runs/${A}/download`).map((c) => c.body)
+  expect(bodies).toEqual([{ confirm_empty_group: false }, { columns: [], confirm_empty_group: false }])
+})
+
+test('other download errors offer no user-id-only retry', async () => {
+  setup({
+    'GET /api/runs': list([run(A)]),
+    [`POST /api/runs/${A}/download`]: apiError(503, 'warehouse_unavailable', 'Warehouse unavailable.'),
+  })
+  const user = userEvent.setup()
+
+  await user.click(within(await row('key_a')).getByRole('button', { name: /download again/i }))
+  expect(await screen.findByRole('alert')).toHaveTextContent(/warehouse unavailable/i)
+  expect(screen.queryByRole('button', { name: /download user ids only/i })).not.toBeInTheDocument()
+})
+
 test('a run with an empty group asks for confirmation first', async () => {
   const { calls, user } = setup({
     'GET /api/runs': list([run(A, { counts: { test: 1, control: 0, total: 1 }, empty_groups: ['control'], requires_empty_group_confirmation: true })]),

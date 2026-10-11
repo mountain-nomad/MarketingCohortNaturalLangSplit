@@ -50,7 +50,8 @@ def test_split_is_audited_with_key_allocation_and_counts(
     [event] = audit_events.of("cohort.split")
     assert event.outcome == "success"
     assert event.actor_type == "user"
-    assert event.target_type == "experiment_run"
+    # Same target type as the export / re-download events of the run (review finding 4).
+    assert event.target_type == "cohort_run"
     assert event.target_id == run["id"]
     metadata = event.metadata_
     assert metadata["experiment_key"] == KEY
