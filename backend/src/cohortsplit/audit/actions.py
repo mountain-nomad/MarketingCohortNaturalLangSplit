@@ -26,6 +26,9 @@ ROLE_UNASSIGN = "role.unassign"
 # cohort run (preview execution: NL request, spec hash, SQL hash, semantic version, rows).
 COHORT_INTERPRET = "cohort.interpret"
 COHORT_RUN = "cohort.run"
+# Experiment split (feature/experiment-split): a run with its membership snapshot (key,
+# allocation, per-group counts). Sensitive, in the run's transaction.
+COHORT_SPLIT = "cohort.split"
 
 # Exports (recorded by the export authorization gate)
 COHORT_EXPORT = "cohort.export"

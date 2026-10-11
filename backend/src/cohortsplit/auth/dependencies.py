@@ -6,6 +6,7 @@ Later features use:
   live session, 403 ``password_change_required`` while a temporary password is set,
   403 ``csrf_failed`` on unsafe methods without a valid ``X-CSRF-Token``);
 * ``require_permission("cohort.export")`` — 403 + audited denial when missing;
+* ``require_any_permission("cohort.create", "cohort.read_all")`` — at least one of them;
 * ``get_db``, ``get_audit``, ``get_policy``, ``get_request_id``, ``get_clock``.
 """
 
@@ -195,6 +196,27 @@ def require_permission(permission: str) -> Callable[..., Principal]:
         raise deny(request, principal, permission, audit, clock)
 
     dependency.__name__ = f"require_{permission.replace('.', '_')}"
+    return dependency
+
+
+def require_any_permission(*permissions: str) -> Callable[..., Principal]:
+    """Dependency factory: the caller must hold at least one of ``permissions``."""
+    unknown = [p for p in permissions if p not in ALL_PERMISSIONS]
+    if not permissions or unknown:
+        raise ValueError(f"unknown permissions {unknown!r}")
+    label = " | ".join(permissions)
+
+    def dependency(
+        request: Request,
+        principal: CurrentPrincipal,
+        audit: Annotated[AuditService, Depends(get_audit)],
+        clock: Annotated[Clock, Depends(get_clock)],
+    ) -> Principal:
+        if any(principal.has(p) for p in permissions):
+            return principal
+        raise deny(request, principal, label, audit, clock)
+
+    dependency.__name__ = "require_any_" + "_or_".join(p.replace(".", "_") for p in permissions)
     return dependency
 
 
