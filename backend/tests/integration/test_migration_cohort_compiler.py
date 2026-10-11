@@ -133,3 +133,32 @@ def test_draft0_use_cases_are_migrated_to_v1_and_back(cfg: Config, appdb: Engine
 
     _clear_use_cases(appdb)
     command.upgrade(cfg, "head")
+
+
+def test_downgrade_never_pairs_an_edited_request_with_the_old_spec(
+    cfg: Config, appdb: Engine
+) -> None:
+    """Review finding 3: a use case edited after the upgrade (new request, v1 spec) must not
+    get its pre-edit draft-0 spec back while staying confirmed (BR-7)."""
+    command.downgrade(cfg, "0004_semantic_context")
+    _clear_use_cases(appdb)
+    edited_id = _insert_use_case(appdb, "edited", DRAFT_SPEC, "confirmed")
+    command.upgrade(cfg, REVISION)
+    with appdb.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE example_use_cases SET nl_request = 'Edited request', "
+                "spec = CAST(:spec AS jsonb) WHERE id = :id"
+            ),
+            {"id": edited_id, "spec": json.dumps(V1_SPEC)},
+        )
+
+    command.downgrade(cfg, "0004_semantic_context")
+
+    row = _use_case(appdb, edited_id)
+    assert row.spec == V1_SPEC
+    assert row.spec_version == "1"
+    assert row.status == "needs_rereview"
+
+    _clear_use_cases(appdb)
+    command.upgrade(cfg, "head")

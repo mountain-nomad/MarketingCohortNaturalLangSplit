@@ -307,3 +307,32 @@ def test_relative_window_defaults_column_to_none() -> None:
     window = RelativeWindow(last_days=7)
     assert window.column is None
     assert window.kind == "relative"
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), [1.0, float("nan")]])
+def test_filter_literals_must_be_finite(value: object) -> None:
+    operator = "in" if isinstance(value, list) else "="
+    with pytest.raises(ValidationError):
+        CohortSpecV1.model_validate(
+            {
+                "spec_version": "1",
+                "where": {
+                    "type": "attribute",
+                    "filter": {"column": "public.users.x", "operator": operator, "value": value},
+                },
+            }
+        )
+
+
+def test_aggregate_threshold_is_not_negative() -> None:
+    with pytest.raises(ValidationError):
+        CohortSpecV1.model_validate(
+            {
+                "spec_version": "1",
+                "where": {
+                    "type": "metric",
+                    "term": "spent",
+                    "aggregate": {"function": "sum", "operator": ">", "value": -5},
+                },
+            }
+        )

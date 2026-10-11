@@ -337,3 +337,16 @@ def test_value_lookup_query() -> None:
 def test_only_postgresql_is_supported() -> None:
     with pytest.raises(UnsupportedDialectError):
         compile_cohort(resolved(None), as_of=AS_OF, dialect="snowflake")
+
+
+def test_not_equal_and_not_in_treat_null_like_not_equals() -> None:
+    """Review finding 5 / ruling C10: 'first_name ≠ Zed' and 'NOT first_name = Zed' select
+    the same users, including those with an unknown (NULL) first name."""
+    not_equal = compiled(attr("public.users.first_name", "!=", "Zed"))
+    negated = compiled({"type": "not", "condition": attr("public.users.first_name", "=", "Zed")})
+    not_in = compiled(attr("public.users.first_name", "not_in", ["Zed", "Ann"]))
+
+    assert 'NOT COALESCE(u."first_name" = %(p1)s, FALSE)' in not_equal.sql
+    assert 'NOT (COALESCE(u."first_name" = %(p1)s, FALSE))' in negated.sql
+    assert 'NOT COALESCE(u."first_name" IN (%(p1)s, %(p2)s), FALSE)' in not_in.sql
+    assert "<>" not in not_equal.sql

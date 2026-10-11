@@ -133,3 +133,38 @@ def test_permission_denials_are_audited(
 
     denied = audit_events.of("access.denied")
     assert [e.metadata_["permission"] for e in denied] == ["cohort.create", "cohort.create"]
+
+
+def test_unsupported_export_column_and_validation_defects_are_audited(
+    app: FastAPI,
+    db: Session,
+    clock: FakeClock,
+    audit_events: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review minor: every refused or failed run leaves a cohort.run event (ruling C11)."""
+    install_environment(app)
+    exporter = marketer(
+        app,
+        db,
+        clock,
+        email="orders@example.com",
+        permissions=("cohort.create", "cohort.export"),
+        export_columns=["public.orders.status"],
+    )
+    interpreted = interpret_ok(exporter)
+    exporter.post(PREVIEW, json=confirm(interpreted, export_columns=["public.orders.status"]))
+
+    from cohortsplit.cohort import service
+    from cohortsplit.compiler.validator import SqlValidationError
+
+    def broken(*_: object, **__: object) -> None:
+        raise SqlValidationError("simulated defect")
+
+    second = interpret_ok(exporter)
+    monkeypatch.setattr(service, "validate_select", broken)
+    response = exporter.post(PREVIEW, json=confirm(second))
+    assert response.status_code == 500
+
+    errors = [e.metadata_["error"] for e in audit_events.of("cohort.run")]
+    assert errors == ["export_column_unsupported", "sql_validation_failed"]
