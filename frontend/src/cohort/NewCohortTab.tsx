@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { api, errorMessage } from '../api/client.ts'
+import { api, ApiError, errorMessage } from '../api/client.ts'
 import type { Me } from '../api/types.ts'
 import type { Clarification, Interpretation, InterpretResult, Preview, Rejection, RejectionReason } from './types.ts'
 
@@ -193,7 +193,10 @@ export function NewCohortTab({ me }: { me: Me }) {
       )
     } catch (failure) {
       setError(errorMessage(failure))
-      setResult(null) // the interpretation can no longer be confirmed as shown
+      // 404 (expired/unknown) and 409 (changed context/mismatch): interpret again.
+      if (failure instanceof ApiError && (failure.status === 404 || failure.status === 409)) {
+        setResult(null)
+      }
     } finally {
       setBusy(false)
     }
