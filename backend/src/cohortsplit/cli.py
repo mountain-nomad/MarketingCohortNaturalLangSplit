@@ -2,7 +2,7 @@
 
 Subcommands are registered by their feature packages (``cohortsplit crawl`` from
 :mod:`cohortsplit.crawler.cli`; ``create-admin`` / ``reset-password`` from
-:mod:`cohortsplit.auth.cli`).
+:mod:`cohortsplit.auth.cli`; ``demo-llm-stub`` from :mod:`cohortsplit.llm.demo_stub`).
 """
 
 import argparse
@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from cohortsplit import __version__
 from cohortsplit.auth.cli import register_subcommands as register_auth_subcommands
 from cohortsplit.crawler.cli import register as register_crawl
+from cohortsplit.llm.demo_stub import register as register_demo_llm_stub
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -22,6 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
     register_crawl(subparsers)
     register_auth_subcommands(subparsers)
+    register_demo_llm_stub(subparsers)
     return parser
 
 

@@ -75,6 +75,21 @@ services:
       warehouse:
         condition: service_healthy
 
+  # Demo only (README "Campaign walkthrough"): a deterministic OpenAI-compatible stub that
+  # answers the README demo requests. Started only with COMPOSE_PROFILES=demo; point
+  # LLM_BASE_URL at http://llm-stub:8090/v1. Use a real provider for anything else.
+  llm-stub:
+    profiles: ["demo"]
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    command: ["cohortsplit", "demo-llm-stub", "--host", "0.0.0.0", "--port", "8090"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8090/v1/models', timeout=2).status == 200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   warehouse-data:
   appdb-data:
