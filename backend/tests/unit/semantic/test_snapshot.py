@@ -190,6 +190,15 @@ def test_tables_carry_raw_schema_metadata_and_row_counts() -> None:
     assert "delivered" in status.sample_values
 
 
+def test_columns_carry_their_type_category_for_literal_checks() -> None:
+    result = snapshot()
+
+    assert _column(result, "public.orders", "status").type_category == "string"
+    assert _column(result, "public.orders", "grand_total").type_category == "numeric"
+    assert _column(result, "public.orders", "ordered_at").type_category == "datetime"
+    assert _column(result, "public.users", "is_active").type_category == "boolean"
+
+
 @pytest.mark.parametrize(
     "policy",
     [

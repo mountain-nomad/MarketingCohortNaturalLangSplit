@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 from sqlalchemy.orm import Session
 
 from cohortsplit.audit import actions
@@ -28,7 +28,9 @@ from cohortsplit.auth.errors import (
     ServiceUnavailableError,
     UnprocessableError,
 )
-from cohortsplit.cohort_spec.draft import DraftCohortSpec, referenced_columns
+from cohortsplit.cohort_spec.common import normalize_term
+from cohortsplit.cohort_spec.upgrade import load_spec
+from cohortsplit.cohort_spec.v1 import CohortSpecV1, referenced_columns, spec_document
 from cohortsplit.config import ConfigError
 from cohortsplit.crawler.sampling import SamplingPolicy
 from cohortsplit.crawler.settings import CrawlerSettings, load_crawler_settings
@@ -39,7 +41,6 @@ from cohortsplit.semantic.context import (
     Definition,
     Synonyms,
     definition_references,
-    normalize_term,
 )
 from cohortsplit.semantic.inventory import ReferenceProblem, SchemaInventory, check_definition
 from cohortsplit.semantic.inventory import check_spec as check_spec_references
@@ -78,7 +79,15 @@ class UseCaseEdit(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     nl_request: NlRequest
-    spec: DraftCohortSpec
+    # draft-0 or v1 accepted; always stored as v1 (ruling C2).
+    spec: CohortSpecV1
+
+    @field_validator("spec", mode="before")
+    @classmethod
+    def _upgrade(cls, value: object) -> object:
+        if isinstance(value, Mapping):
+            return load_spec(value)
+        return value
 
 
 class RejectBody(BaseModel):
@@ -342,7 +351,7 @@ class SemanticContextService:
             raise NotFoundError("Use case")
         return row
 
-    def _check_spec(self, db: Session, spec: DraftCohortSpec) -> None:
+    def _check_spec(self, db: Session, spec: CohortSpecV1) -> None:
         inventory = self._inventory(db)
         if inventory is None:
             raise inventory_unavailable()
@@ -363,7 +372,7 @@ class SemanticContextService:
         if row.status not in CONFIRMABLE:
             raise self._transition_error(row, "confirmed")
         try:
-            spec = DraftCohortSpec.model_validate(dict(row.spec))
+            spec = load_spec(dict(row.spec))
         except ValueError:
             raise UnprocessableError(
                 "invalid_spec", "The stored spec is no longer valid; edit the use case instead."
@@ -430,7 +439,7 @@ class SemanticContextService:
         row = self._locked_use_case(db, use_case_id)
         self._check_spec(db, edit.spec)
         before = self.current_version(db)
-        spec = edit.spec.model_dump(mode="json", exclude_none=True)
+        spec = spec_document(edit.spec)
         repo.update_use_case(
             db,
             use_case_id,

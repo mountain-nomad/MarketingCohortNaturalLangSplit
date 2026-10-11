@@ -113,8 +113,9 @@ def test_crawl_persists_generated_docs_and_pending_use_cases(
     assert use_cases
     assert {u.origin for u in use_cases} == {"generated"}
     assert {u.status for u in use_cases} == {"pending_review"}
-    assert all(u.spec["spec_version"] == "draft-0" for u in use_cases)
-    assert all(u.spec_version == "draft-0" for u in use_cases)
+    # Generated use cases carry the real cohort spec v1 (crawler ruling R1, ruling C2).
+    assert all(u.spec["spec_version"] == "1" for u in use_cases)
+    assert all(u.spec_version == "1" for u in use_cases)
     assert report.inserted_use_cases == len(use_cases)
 
     run = crawl_store.get_run(report.run_id)

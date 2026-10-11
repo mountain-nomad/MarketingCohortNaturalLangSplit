@@ -9,12 +9,13 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from cohortsplit.cohort_spec import v1
+from cohortsplit.cohort_spec.common import table_of
 from cohortsplit.cohort_spec.draft import DraftCohortSpec, referenced_columns
 from cohortsplit.semantic.context import (
     CanonicalUserIdDefinition,
     Definition,
     definition_references,
-    table_of,
 )
 
 UNKNOWN_TABLE = "unknown table"
@@ -89,8 +90,14 @@ def check_definition(
     return tuple(problems)
 
 
-def check_spec(spec: DraftCohortSpec, inventory: SchemaInventory) -> tuple[ReferenceProblem, ...]:
-    """Problems with a draft cohort spec's references (edited/confirmed use cases)."""
+def check_spec(
+    spec: DraftCohortSpec | v1.CohortSpecV1, inventory: SchemaInventory
+) -> tuple[ReferenceProblem, ...]:
+    """Problems with a cohort spec's references (edited/confirmed use cases)."""
+    if isinstance(spec, v1.CohortSpecV1):
+        return tuple(
+            _check_references(v1.referenced_tables(spec), v1.referenced_columns(spec), inventory)
+        )
     columns = referenced_columns(spec)
     tables = {spec.entity.table} | {table_of(c) for c in columns}
     return tuple(_check_references(tables, columns, inventory))

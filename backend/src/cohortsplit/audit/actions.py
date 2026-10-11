@@ -22,6 +22,11 @@ ROLE_DELETE = "role.delete"
 ROLE_ASSIGN = "role.assign"
 ROLE_UNASSIGN = "role.unassign"
 
+# Cohort compiler (feature/cohort-compiler): an interpretation (nothing executed) and a
+# cohort run (preview execution: NL request, spec hash, SQL hash, semantic version, rows).
+COHORT_INTERPRET = "cohort.interpret"
+COHORT_RUN = "cohort.run"
+
 # Exports (recorded by the export authorization gate)
 COHORT_EXPORT = "cohort.export"
 COHORT_REDOWNLOAD = "cohort.redownload"

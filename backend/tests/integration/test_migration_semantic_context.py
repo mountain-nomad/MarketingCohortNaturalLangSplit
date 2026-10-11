@@ -44,10 +44,13 @@ def _tables(engine: Engine) -> set[str]:
         return set(inspect(conn).get_table_names())
 
 
-def test_single_head_is_the_semantic_context_revision(cfg: Config) -> None:
+def test_semantic_context_revision_is_on_the_single_chain(cfg: Config) -> None:
     script = ScriptDirectory.from_config(cfg)
 
-    assert script.get_heads() == [REVISION]
+    # Later revisions chain on top of it; the single head is asserted by the newest
+    # migration's own test and by tests/integration/test_migrations.py.
+    assert len(script.get_heads()) == 1
+    assert REVISION in {r.revision for r in script.walk_revisions()}
     revision = script.get_revision(REVISION)
     assert revision is not None
     assert revision.down_revision == "0002_auth"

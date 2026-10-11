@@ -1,9 +1,10 @@
 """Data-driven example use cases from deterministic templates (AC-22, AC-23)."""
 
-from cohortsplit.cohort_spec.draft import (
+from cohortsplit.cohort_spec.v1 import (
     AttributeCondition,
     AttributeTimeWindowCondition,
     RelatedCondition,
+    RelativeWindow,
     referenced_columns,
 )
 from cohortsplit.crawler.catalog import WarehouseCatalog
@@ -30,6 +31,7 @@ def _related(use_case: GeneratedUseCase) -> RelatedCondition:
 
 
 def _path_tables(condition: RelatedCondition) -> list[str]:
+    assert condition.path is not None
     return [j.to_column.rsplit(".", 1)[0] for j in condition.path]
 
 
@@ -44,6 +46,8 @@ def test_liked_product_rewritten_to_bought_product_without_likes_data() -> None:
     assert liked.generation_note is not None
     assert "likes" in liked.generation_note
     condition = _related(liked)
+    # Spec v1: the target is the table directly linked to the user.
+    assert condition.table == "public.orders"
     assert _path_tables(condition) == [
         "public.orders",
         "public.order_items",
@@ -109,7 +113,7 @@ def test_status_templates_use_real_values() -> None:
     condition = _related(orders)
     assert condition.filters[0].column == "public.orders.status"
     assert condition.filters[0].value == "delivered"
-    assert condition.time_window is not None
+    assert isinstance(condition.time_window, RelativeWindow)
     assert condition.time_window.column == "public.orders.ordered_at"
     assert condition.time_window.last_days == 90
     assert condition.aggregate is not None
@@ -147,7 +151,9 @@ def test_country_category_spend_and_registration() -> None:
     registered = _by_template(result, "registered_recently")
     assert registered.nl_request == "Users who registered in the last 30 days"
     assert isinstance(registered.spec.where, AttributeTimeWindowCondition)
+    assert isinstance(registered.spec.where.window, RelativeWindow)
     assert registered.spec.where.window.column == "public.users.created_at"
+    assert registered.spec.where.window.last_days == 30
 
 
 def test_all_generated_use_cases_pending_review_and_valid() -> None:
@@ -159,9 +165,14 @@ def test_all_generated_use_cases_pending_review_and_valid() -> None:
     keys = [u.key for u in result.use_cases]
     assert len(keys) == len(set(keys))
     for use_case in result.use_cases:
-        assert use_case.spec.spec_version == "draft-0"
-        assert use_case.spec.entity.table == "public.users"
-        assert use_case.spec.entity.key == "user_id"
+        assert use_case.spec.spec_version == "1"
+        assert use_case.spec.entity == "user"
+        if isinstance(use_case.spec.where, RelatedCondition):
+            # Paths start at the user entity's key and the target is the first hop.
+            assert use_case.spec.where.path is not None
+            first = use_case.spec.where.path[0]
+            assert first.from_column == "public.users.user_id"
+            assert use_case.spec.where.table == first.to_column.rsplit(".", 1)[0]
         missing = referenced_columns(use_case.spec) - catalog.qualified_columns()
         assert not missing, (use_case.key, missing)
 

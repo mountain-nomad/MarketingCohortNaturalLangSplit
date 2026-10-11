@@ -4,7 +4,7 @@ import psycopg
 import pytest
 from pydantic import SecretStr
 
-from cohortsplit.cohort_spec.draft import referenced_columns
+from cohortsplit.cohort_spec.v1 import referenced_columns
 from cohortsplit.crawler.catalog import WarehouseCatalog
 from cohortsplit.crawler.metadata import collect_catalog
 from cohortsplit.crawler.sampling import SamplingPolicy

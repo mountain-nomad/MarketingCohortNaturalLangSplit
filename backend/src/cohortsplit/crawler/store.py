@@ -21,7 +21,9 @@ from typing import Any
 from sqlalchemy import Connection, Engine, Row, delete, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from cohortsplit.cohort_spec.draft import DraftCohortSpec, referenced_columns
+from cohortsplit.cohort_spec.draft import DraftCohortSpec
+from cohortsplit.cohort_spec.upgrade import upgrade_draft0
+from cohortsplit.cohort_spec.v1 import CohortSpecV1, referenced_columns, spec_document
 from cohortsplit.crawler.catalog import WarehouseCatalog
 from cohortsplit.crawler.tables import crawl_runs, example_use_cases, semantic_docs
 from cohortsplit.crawler.use_cases import GeneratedUseCase, UseCaseGeneration, UseCaseStatus
@@ -328,7 +330,7 @@ class CrawlStore:
                     "origin": "generated",
                     "status": u.status,
                     "nl_request": u.nl_request,
-                    "spec": u.spec.model_dump(mode="json"),
+                    "spec": spec_document(u.spec),
                     "spec_version": u.spec.spec_version,
                     "template_key": u.template_key,
                     "rewritten_from": u.rewritten_from,
@@ -402,8 +404,13 @@ class CrawlStore:
     # -- human content and review (used by the semantic-context branch) --------------------
 
     def add_human_use_case(
-        self, nl_request: str, spec: DraftCohortSpec, status: UseCaseStatus = "pending_review"
+        self,
+        nl_request: str,
+        spec: CohortSpecV1 | DraftCohortSpec,
+        status: UseCaseStatus = "pending_review",
     ) -> int:
+        if isinstance(spec, DraftCohortSpec):
+            spec = upgrade_draft0(spec)  # stored as the real spec (crawler ruling R1)
         with self._engine.begin() as conn:
             use_case_id: int = conn.execute(
                 example_use_cases.insert()
@@ -412,7 +419,7 @@ class CrawlStore:
                     origin="human",
                     status=status,
                     nl_request=nl_request,
-                    spec=spec.model_dump(mode="json"),
+                    spec=spec_document(spec),
                     spec_version=spec.spec_version,
                     referenced_columns=sorted(referenced_columns(spec)),
                 )

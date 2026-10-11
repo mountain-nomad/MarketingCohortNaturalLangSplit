@@ -127,6 +127,7 @@ def test_audit_actor_type_and_outcome_are_constrained(pg: Connection) -> None:
 def test_orm_models_match_the_migration(pg: Connection) -> None:
     import cohortsplit.audit.models
     import cohortsplit.auth.models
+    import cohortsplit.cohort.models
     import cohortsplit.semantic.models  # noqa: F401  (register tables on Base.metadata)
 
     owned = set(Base.metadata.tables)

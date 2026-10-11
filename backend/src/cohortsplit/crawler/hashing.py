@@ -8,6 +8,7 @@ import hashlib
 import json
 from typing import Any
 
+from cohortsplit.cohort_spec.v1 import spec_document
 from cohortsplit.crawler.catalog import WarehouseCatalog
 from cohortsplit.crawler.use_cases import UseCaseGeneration
 
@@ -26,7 +27,7 @@ def generated_content(catalog: WarehouseCatalog, generation: UseCaseGeneration) 
                 "key": u.key,
                 "template_key": u.template_key,
                 "nl_request": u.nl_request,
-                "spec": u.spec.model_dump(mode="json"),
+                "spec": spec_document(u.spec),
                 "rewritten_from": u.rewritten_from,
                 "generation_note": u.generation_note,
             }

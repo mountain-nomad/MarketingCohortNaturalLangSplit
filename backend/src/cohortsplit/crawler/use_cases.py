@@ -16,18 +16,19 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Literal
 
-from cohortsplit.cohort_spec.draft import (
+from cohortsplit.cohort_spec.common import Filter as ValueFilter
+from cohortsplit.cohort_spec.common import table_of
+from cohortsplit.cohort_spec.v1 import (
+    SPEC_VERSION,
     Aggregate,
     AttributeCondition,
     AttributeTimeWindowCondition,
+    CohortSpecV1,
     Condition,
-    DraftCohortSpec,
-    EntityRef,
     Join,
     RelatedCondition,
-    TimeWindow,
-    ValueFilter,
 )
+from cohortsplit.cohort_spec.v1 import RelativeWindow as TimeWindow
 from cohortsplit.crawler.catalog import ColumnDoc, TableDoc, WarehouseCatalog
 from cohortsplit.crawler.entities import USER_TABLE_NAMES, detect_user_table
 from cohortsplit.crawler.vocabulary import (
@@ -45,7 +46,7 @@ class GeneratedUseCase:
     key: str
     template_key: str
     nl_request: str
-    spec: DraftCohortSpec
+    spec: CohortSpecV1
     rewritten_from: str | None = None
     generation_note: str | None = None
     status: UseCaseStatus = "pending_review"
@@ -112,10 +113,6 @@ class _Context:
             hops.sort()
 
     # -- lookup ----------------------------------------------------------------------------
-
-    @property
-    def entity(self) -> EntityRef:
-        return EntityRef(table=self.user.qualified_name, key=self.user.primary_key[0])
 
     def find_table(self, names: Iterable[str]) -> TableDoc | None:
         for name in names:
@@ -215,6 +212,18 @@ def _q(table: TableDoc, column: ColumnDoc | str) -> str:
 
 Resolution = tuple[str, Condition, str | None]
 
+
+def _related(path: tuple[Join, ...], **fields: object) -> RelatedCondition:
+    """Spec v1 related condition whose target is the table directly linked to the user."""
+    return RelatedCondition.model_validate(
+        {"table": table_of(path[0].to_column), "path": path, **fields}
+    )
+
+
+def _spec(condition: Condition) -> CohortSpecV1:
+    return CohortSpecV1(spec_version=SPEC_VERSION, where=condition)
+
+
 # --- templates ---------------------------------------------------------------------------
 
 
@@ -225,8 +234,8 @@ def _product_via(ctx: _Context, words: frozenset[str], what: str) -> Resolution:
         to_product = ctx.path(event, product)
         if to_event is not None and to_product is not None and len(to_product) <= 2:
             value = ctx.key_example(product)
-            condition = RelatedCondition(
-                path=(*to_event, *to_product),
+            condition = _related(
+                (*to_event, *to_product),
                 filters=(
                     ValueFilter(
                         column=_q(product, product.primary_key[0]), operator="=", value=value
@@ -254,8 +263,8 @@ def _purchased_product(ctx: _Context) -> Resolution:
     product = ctx.required(PRODUCT_TABLES, "product")
     _, path = ctx.path_from_purchase(product)
     value = ctx.key_example(product)
-    condition = RelatedCondition(
-        path=path,
+    condition = _related(
+        path,
         filters=(
             ValueFilter(column=_q(product, product.primary_key[0]), operator="=", value=value),
         ),
@@ -273,9 +282,7 @@ def _purchased_in_category(ctx: _Context) -> Resolution:
         column, value = _q(category, label), label_values[0]
     else:
         column, value = _q(category, category.primary_key[0]), ctx.key_example(category)
-    condition = RelatedCondition(
-        path=path, filters=(ValueFilter(column=column, operator="=", value=value),)
-    )
+    condition = _related(path, filters=(ValueFilter(column=column, operator="=", value=value),))
     return f"Users who bought anything from category {value}", condition, None
 
 
@@ -294,8 +301,8 @@ def _orders_with_status(ctx: _Context) -> Resolution:
     if when is None:
         raise _UnsupportedError(f"no order timestamp column on {orders.qualified_name}")
     value = values[0]
-    condition = RelatedCondition(
-        path=path,
+    condition = _related(
+        path,
         filters=(ValueFilter(column=_q(orders, status), operator="=", value=value),),
         time_window=TimeWindow(column=_q(orders, when), last_days=90),
         aggregate=Aggregate(function="count", operator=">=", value=2),
@@ -311,8 +318,8 @@ def _cart_with_status(ctx: _Context) -> Resolution:
         raise _UnsupportedError(f"{cart.qualified_name} is not linked to {ctx.user.qualified_name}")
     status, values = _status_column(ctx, cart)
     value = "abandoned" if "abandoned" in values else values[0]
-    condition = RelatedCondition(
-        path=path, filters=(ValueFilter(column=_q(cart, status), operator="=", value=value),)
+    condition = _related(
+        path, filters=(ValueFilter(column=_q(cart, status), operator="=", value=value),)
     )
     sampled = ctx.catalog.sample_values(cart.qualified_name, status.name)
     note = (
@@ -342,7 +349,7 @@ def _attribute_or_related(
                     column,
                     table,
                     values[0],
-                    RelatedCondition(path=path, filters=(value_filter,)),
+                    _related(path, filters=(value_filter,)),
                 )
     return None
 
@@ -388,8 +395,8 @@ def _used_discount(ctx: _Context) -> Resolution:
         full_path = path if table is orders else ctx.path(ctx.user, table)
         if full_path is None or table.qualified_name == ctx.user.qualified_name:
             continue
-        condition = RelatedCondition(
-            path=full_path, filters=(ValueFilter(column=_q(table, column), operator=">", value=0),)
+        condition = _related(
+            full_path, filters=(ValueFilter(column=_q(table, column), operator=">", value=0),)
         )
         return "Users who placed an order with a discount", condition, None
     raise _UnsupportedError(f"no numeric discount column on {orders.qualified_name} or its lines")
@@ -400,8 +407,8 @@ def _spent_more_than(ctx: _Context) -> Resolution:
     money = _column(orders, MONEY_COLUMNS, {"numeric"})
     if money is None:
         raise _UnsupportedError(f"no order total/amount column on {orders.qualified_name}")
-    condition = RelatedCondition(
-        path=path,
+    condition = _related(
+        path,
         aggregate=Aggregate(function="sum", column=_q(orders, money), operator=">", value=500),
     )
     note = "Which orders count as spending (e.g. statuses) belongs in business context."
@@ -462,7 +469,7 @@ TEMPLATES: tuple[_Template, ...] = (
 def _build(ctx: _Context, template: _Template) -> GeneratedUseCase | DroppedTemplate:
     try:
         nl, condition, note = template.resolve(ctx)
-        spec = DraftCohortSpec(entity=ctx.entity, where=condition)
+        spec = _spec(condition)
         return GeneratedUseCase(
             key=template.key,
             template_key=template.key,
@@ -493,7 +500,7 @@ def _build(ctx: _Context, template: _Template) -> GeneratedUseCase | DroppedTemp
             key=template.key,
             template_key=template.key,
             nl_request=nl,
-            spec=DraftCohortSpec(entity=ctx.entity, where=condition),
+            spec=_spec(condition),
             rewritten_from=template.nl_template,
             generation_note=generation_note,
         )
