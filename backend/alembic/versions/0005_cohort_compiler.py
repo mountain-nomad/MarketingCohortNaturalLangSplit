@@ -158,9 +158,20 @@ def _upgrade_specs() -> None:
 def downgrade() -> None:
     conn = op.get_bind()
     backups = conn.execute(
-        sa.text("SELECT use_case_id, spec, referenced_columns FROM spec_draft0_backup")
+        sa.text(
+            "SELECT b.use_case_id, b.spec, b.referenced_columns, u.spec AS current_spec "
+            "FROM spec_draft0_backup b JOIN example_use_cases u ON u.id = b.use_case_id"
+        )
     ).all()
     for backup in backups:
+        try:
+            untouched = backup.current_spec == spec_document(
+                upgrade_draft0(DraftCohortSpec.model_validate(dict(backup.spec)))
+            )
+        except ValidationError:
+            untouched = False
+        if not untouched:
+            continue  # edited after the upgrade: stays v1 and is flagged for re-review below
         columns = list(backup.referenced_columns)
         conn.execute(
             sa.text(

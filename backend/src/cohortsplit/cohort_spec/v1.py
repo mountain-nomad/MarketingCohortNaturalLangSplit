@@ -120,6 +120,8 @@ class Aggregate(FrozenModel):
             raise ValueError("count takes no column (it counts distinct target rows)")
         if isinstance(self.value, float) and not math.isfinite(self.value):
             raise ValueError("threshold must be finite")
+        if self.value < 0:
+            raise ValueError("threshold must not be negative")
         return self
 
 

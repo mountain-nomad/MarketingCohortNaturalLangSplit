@@ -219,3 +219,21 @@ test('the tab is hidden and gated without cohort.create', () => {
   expect(screen.getByText(/not available/i)).toBeInTheDocument()
   expect(screen.queryByLabelText(/describe the audience/i)).not.toBeInTheDocument()
 })
+
+test('a preview error that does not invalidate the interpretation keeps it confirmable', async () => {
+  setup(
+    {
+      'POST /api/cohorts/interpret': { body: interpretation },
+      'POST /api/cohorts/preview': apiError(403, 'export_column_denied', 'None of your roles is granted export of: public.users.email.'),
+    },
+    ['cohort.create', 'cohort.export'],
+  )
+
+  const user = await ask()
+  await user.type(await screen.findByLabelText(/extra export columns/i), 'public.users.email')
+  await user.click(screen.getByRole('button', { name: /confirm and preview/i }))
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(/public.users.email/)
+  expect(screen.getByRole('button', { name: /confirm and preview/i })).toBeInTheDocument()
+  expect(screen.getByText(interpretation.readable)).toBeInTheDocument()
+})

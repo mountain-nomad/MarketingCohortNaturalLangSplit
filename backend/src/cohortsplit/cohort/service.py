@@ -391,8 +391,12 @@ class CohortService:
         )
         columns = self._export_columns(db, ctx, run, resolved, export_columns)
         compiled = compile_cohort(resolved, as_of=ctx.now)
-        self._validate(compiled, snapshot)
         run.sql_hash = sql_hash(compiled)
+        try:
+            self._validate(compiled, snapshot)
+        except errors.SqlValidationApiError:
+            self._run_failed(ctx, run, "sql_validation_failed")
+            raise
         db.rollback()  # release the appdb connection during warehouse work
         try:
             executor = env.executor()
@@ -400,11 +404,17 @@ class CohortService:
             self._run_failed(ctx, run, "warehouse_not_configured")
             raise ServiceUnavailableError("warehouse_not_configured", str(exc)) from None
         try:
-            self._check_lookups(executor, resolved, snapshot, ctx, run)
-            membership = executor.execute(compiled.sql, compiled.params)
-            total = len(membership.rows)
-            sample = self._sample(executor, resolved, snapshot, columns, total, ctx.now)
-            null_counts = self._null_counts(executor, resolved, snapshot, columns, total, ctx.now)
+            try:
+                self._check_lookups(executor, resolved, snapshot, ctx, run)
+                membership = executor.execute(compiled.sql, compiled.params)
+                total = len(membership.rows)
+                sample = self._sample(executor, resolved, snapshot, columns, total, ctx.now)
+                null_counts = self._null_counts(
+                    executor, resolved, snapshot, columns, total, ctx.now
+                )
+            except errors.SqlValidationApiError:
+                self._run_failed(ctx, run, "sql_validation_failed")
+                raise
         except RowCapExceededError as exc:
             self._run_failed(ctx, run, "row_cap_exceeded")
             raise errors.RowCapError(exc.row_cap) from None
@@ -508,6 +518,7 @@ class CohortService:
             or c.rsplit(".", 1)[1] not in resolved.user_columns
         ]
         if unsupported:
+            self._run_failed(ctx, run, "export_column_unsupported", outcome="denied")
             raise errors.ExportColumnUnsupportedError(unsupported, resolved.user_table)
         return columns
 

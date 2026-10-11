@@ -91,3 +91,30 @@ def test_sequence_wording_is_not_supported_yet(request_text: str) -> None:
 )
 def test_cohort_requests_pass(request_text: str) -> None:
     assert pre_guard(request_text) is None
+
+
+@pytest.mark.parametrize(
+    "request_text",
+    [
+        "Create a cohort of users from Germany",
+        "Add users who bought shoes to a cohort",
+        "Build an audience of users with an abandoned cart",
+        "Make a segment of active users",
+        "Has a paid order",
+        "Did not order in 2024",
+        "Total spend above 500 in 2024",
+        "Is active and registered in 2024",
+    ],
+)
+def test_natural_cohort_phrasing_is_not_rejected(request_text: str) -> None:
+    """Review finding 2: 'Create a cohort of …' is the most likely phrasing in a tab named
+    'New cohort'; auxiliary-verb openers are only questions with a question mark."""
+    assert pre_guard(request_text) is None
+
+
+@pytest.mark.parametrize(
+    "request_text",
+    ["Create a table of users", "Delete the cohort list", "Did revenue grow in 2024?"],
+)
+def test_guard_still_rejects_near_misses(request_text: str) -> None:
+    assert pre_guard(request_text) is not None

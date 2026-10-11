@@ -287,7 +287,11 @@ def _display(value: JsonScalar) -> str:
     return str(value)
 
 
-def _filter(ctx: _Context, value_filter: Filter, position: int) -> RFilter | None:
+def _filter(
+    ctx: _Context, value_filter: Filter, position: int, *, trusted: bool = False
+) -> RFilter | None:
+    """``trusted``: a value from a reviewed business definition, not typed by the marketer;
+    it is coerced but never value-checked or looked up (a value with no rows matches nothing)."""
     column = ctx.catalog.column(value_filter.column)
     if column is None:
         ctx.problem(f"unknown column {value_filter.column}")
@@ -303,7 +307,7 @@ def _filter(ctx: _Context, value_filter: Filter, position: int) -> RFilter | Non
     if any(v is None for v in coerced):
         return None
     values = tuple(v for v in coerced if v is not None)
-    if value_filter.operator in EQUALITY_OPERATORS:
+    if value_filter.operator in EQUALITY_OPERATORS and not trusted:
         domain = column.domain if column.category in ("string", "enum") else None
         if domain is not None:
             for value in values:
@@ -460,14 +464,15 @@ def _related(
     ctx.tables |= {ctx.user_table, *positions}
 
     resolved_filters: list[RFilter] = []
-    for value_filter in (*base_filters, *filters):
+    trusted_count = len(base_filters)
+    for index, value_filter in enumerate((*base_filters, *filters)):
         if ctx.catalog.column(value_filter.column) is None:
             ctx.problem(f"unknown column {value_filter.column}")
             continue
         position = _position(ctx, value_filter.column, positions)
         if position is None:
             continue
-        resolved = _filter(ctx, value_filter, position)
+        resolved = _filter(ctx, value_filter, position, trusted=index < trusted_count)
         if resolved is not None:
             resolved_filters.append(resolved)
 

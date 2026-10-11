@@ -101,8 +101,13 @@ class _Builder:
             return f"{column} IS NOT NULL"
         if operator in ("in", "not_in"):
             items = ", ".join(self.literal(v, value_filter.category) for v in value_filter.values)
-            return f"{column} {'IN' if operator == 'in' else 'NOT IN'} ({items})"
+            if operator == "not_in":
+                return f"NOT COALESCE({column} IN ({items}), FALSE)"
+            return f"{column} IN ({items})"
         value = self.literal(value_filter.values[0], value_filter.category)
+        if operator == "!=":
+            # Same as NOT (=): an unknown (NULL) value counts as different (ruling C10).
+            return f"NOT COALESCE({column} = {value}, FALSE)"
         return f"{column} {_COMPARISON[operator]} {value}"
 
     def window(self, window: RWindow, alias: str) -> str:
@@ -165,8 +170,8 @@ class _Builder:
         match node:
             case RAttribute(filter=value_filter):
                 predicate = self.filter(value_filter, USER_ALIAS)
-                if value_filter.operator in ("is_null", "is_not_null"):
-                    return predicate
+                if value_filter.operator in ("is_null", "is_not_null", "!=", "not_in"):
+                    return predicate  # never NULL
                 return f"COALESCE({predicate}, FALSE)"
             case RAttributeWindow(window=window):
                 return f"COALESCE({self.window(window, USER_ALIAS)}, FALSE)"

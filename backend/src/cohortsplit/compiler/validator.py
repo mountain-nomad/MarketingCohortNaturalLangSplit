@@ -158,6 +158,10 @@ def validate_select(sql: str, *, allowed_tables: Iterable[str], dialect: str = D
             raise SqlValidationError(f"{_describe(node)} are not allowed")
         if isinstance(node, exp.Table):
             _check_table(node, allowed)
+        elif isinstance(node, exp.DataType) and not node.is_type(exp.DataType.Type.TIMESTAMPTZ):
+            raise SqlValidationError(f"casts to {node.sql('postgres')} are not allowed")
+        elif isinstance(node, exp.Join) and (node.args.get("on") is None or node.args.get("kind")):
+            raise SqlValidationError("only inner joins with an ON condition are allowed")
         elif isinstance(node, exp.Column) and (node.args.get("db") or node.args.get("catalog")):
             raise SqlValidationError("schema-qualified column references are not allowed")
 

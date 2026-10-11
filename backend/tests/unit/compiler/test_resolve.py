@@ -26,6 +26,7 @@ from tests.unit.compiler.fixtures import (
     ORDERS_HOP,
     PURCHASE,
     attr,
+    entry,
     flt,
     hop,
     shop_snapshot,
@@ -392,3 +393,47 @@ def test_resolved_tables_cover_every_table_used() -> None:
         "public.categories",
         "public.carts",
     }
+
+
+def test_business_defined_values_are_trusted_not_value_checked() -> None:
+    """Review finding 1: reviewed definitions are not literals the marketer typed. A defined
+    value outside the known domain simply matches nothing; no lookup is issued for it."""
+    refunded = entry(
+        "refund",
+        {
+            "kind": "metric",
+            "table": "public.orders",
+            "filters": [{"column": "public.orders.status", "operator": "=", "value": "refunded"}],
+        },
+    )
+    snapshot = shop_snapshot(entries=[*DEFAULT_ENTRIES, refunded])
+    result = resolve(spec({"type": "metric", "term": "refund"}), snapshot)
+    assert isinstance(result, ResolvedCohort), result
+    assert result.lookups == ()
+
+    unknown_domain = entry(
+        "test_accounts",
+        {
+            "kind": "exclusion",
+            "table": "public.users",
+            "filters": [{"column": "public.users.first_name", "operator": "=", "value": "Tester"}],
+        },
+    )
+    result = resolve(spec(None), shop_snapshot(entries=[*DEFAULT_ENTRIES, unknown_domain]))
+    assert isinstance(result, ResolvedCohort), result
+    assert result.lookups == ()
+
+
+def test_user_literals_are_still_value_checked_next_to_definitions() -> None:
+    result = resolve(
+        spec(
+            {
+                "type": "metric",
+                "term": "purchase",
+                "filters": [flt("public.orders.status", "=", "deliverd")],
+            }
+        ),
+        SNAPSHOT,
+    )
+    assert isinstance(result, Unresolved)
+    assert [v.value for v in result.unknown_values] == ["deliverd"]

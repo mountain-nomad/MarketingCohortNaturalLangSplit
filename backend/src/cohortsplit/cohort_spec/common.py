@@ -5,9 +5,9 @@ plain values: nothing here is SQL.
 """
 
 import unicodedata
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from cohortsplit.cohort_spec.draft import QualifiedColumn, QualifiedTable
 
@@ -25,7 +25,8 @@ __all__ = [
 
 MAX_IN_VALUES = 200
 
-Scalar = str | int | float | bool
+# Literals are JSON-safe and finite (NaN/Infinity would break hashing and SQL binding).
+Scalar = str | int | Annotated[float, Field(allow_inf_nan=False)] | bool
 Operator = Literal["=", "!=", ">", ">=", "<", "<=", "in", "not_in", "is_null", "is_not_null"]
 LIST_OPERATORS = frozenset({"in", "not_in"})
 NULL_OPERATORS = frozenset({"is_null", "is_not_null"})

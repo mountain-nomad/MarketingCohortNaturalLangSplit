@@ -51,11 +51,19 @@ _SQL_WRITE = re.compile(
 ANALYTICS_OPENERS = frozenset(
     {
         "what", "what's", "whats", "how", "why", "when", "where", "compare", "calculate",
-        "compute", "average", "sum", "total", "plot", "chart", "graph", "forecast", "predict",
-        "is", "are", "was", "were", "does", "do", "did", "has", "have", "will", "would",
-        "should",
+        "compute", "plot", "chart", "graph", "forecast", "predict",
     }
 )  # fmt: skip
+# Openers that are only a question with a question mark ("Has a paid order" is a cohort).
+QUESTION_OPENERS = frozenset(
+    {
+        "is", "are", "was", "were", "does", "do", "did", "has", "have", "will", "would",
+        "should", "average", "sum", "total",
+    }
+)  # fmt: skip
+# Building an audience is not a data change: "Create a cohort of …", "Add users … to a list".
+AUDIENCE_VERBS = frozenset({"add", "build", "create", "make"})
+_AUDIENCE = re.compile(r"\b(?:cohorts?|segments?|audiences?|lists?)\b", re.IGNORECASE)
 _SEQUENCE = re.compile(
     r"\bthen\b|\bfollowed by\b|\bafterwards\b|\bsubsequently\b"
     r"|\b(?:within|in)\s+\d+\s*(?:minutes?|mins?|hours?|h|days?|d|weeks?|months?)\s+"
@@ -76,9 +84,11 @@ def _first_word(text: str) -> str:
 def pre_guard(nl_request: str) -> Rejection | None:
     """A deterministic rejection for mutation / analytics / sequence requests, else None."""
     first = _first_word(nl_request)
-    if first in MUTATION_VERBS or _SQL_WRITE.search(nl_request):
+    audience = first in AUDIENCE_VERBS and bool(_AUDIENCE.search(nl_request))
+    if (first in MUTATION_VERBS and not audience) or _SQL_WRITE.search(nl_request):
         return Rejection(reason="mutation", message=MUTATION_MESSAGE)
-    if first in ANALYTICS_OPENERS:
+    question = nl_request.rstrip().endswith("?")
+    if first in ANALYTICS_OPENERS or (first in QUESTION_OPENERS and question):
         return Rejection(reason="analytics", message=ANALYTICS_MESSAGE)
     if _SEQUENCE.search(nl_request):
         return Rejection(reason="unsupported_construct", message=SEQUENCE_MESSAGE)

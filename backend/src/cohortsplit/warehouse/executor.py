@@ -127,7 +127,9 @@ class ReadOnlyExecutor:
             try:
                 with conn.transaction(force_rollback=True), conn.cursor() as cur:
                     cur.execute(
-                        "SELECT set_config('statement_timeout', %(ms)s, true)",
+                        # TimeZone pinned to UTC: windows and dates are UTC (ruling C1).
+                        "SELECT set_config('statement_timeout', %(ms)s, true), "
+                        "set_config('TimeZone', 'UTC', true)",
                         {"ms": str(timeout_ms)},
                     )
                     rows: list[tuple[object, ...]] = []
