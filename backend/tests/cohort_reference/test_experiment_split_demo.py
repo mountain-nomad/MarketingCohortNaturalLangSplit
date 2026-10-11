@@ -247,6 +247,10 @@ def test_users_gone_from_the_warehouse_keep_their_row(
     run = run_split(world, client, "All users", {"spec_version": "1"}, columns=[email])
     assert run["counts"]["total"] == 10
 
+    scratch.admin(
+        "DELETE FROM {s}.order_items WHERE order_id IN "
+        "(SELECT order_id FROM {s}.orders WHERE user_id = 3)"
+    )
     scratch.admin("DELETE FROM {s}.orders WHERE user_id = 3")
     scratch.admin("DELETE FROM {s}.carts WHERE user_id = 3")
     scratch.admin("DELETE FROM {s}.users WHERE user_id = 3")
