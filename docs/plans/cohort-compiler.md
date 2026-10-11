@@ -151,21 +151,21 @@ def execute_membership(executor, prepared, *, allowed_tables) -> tuple[str, ...]
 
 | AC | Test(s) |
 |---|---|
-| AC-1 | `tests/integration/test_cohort_reference.py::test_ac1_two_delivered_orders_in_last_90_days` (readable text + ID set = reference SQL) |
-| AC-2 | `…::test_ac2_country_abandoned_cart_never_paid` (demo), `…::test_ac2_guest_carts_never_match` (scratch schema with guest carts); unit `tests/unit/compiler/test_sql.py::test_related_exists_correlates_on_user_key` |
+| AC-1 | `tests/cohort_reference/test_cohort_reference.py::test_ac1_two_delivered_orders_in_last_90_days` (readable text + ID set = reference SQL) |
+| AC-2 | `…::test_ac2_country_abandoned_cart_never_paid` (demo), `tests/cohort_reference/test_cohort_execution.py::test_ac2_guest_carts_never_match` (scratch schema with guest carts), `…::test_ac2_variant_with_real_demo_carts`; unit `tests/unit/compiler/test_sql.py::test_related_exists_correlates_on_user_key` |
 | AC-3 | `…::test_ac3_category_but_not_product` |
-| AC-4 | `…::test_ac4_active_registered_in_year_spent_over_500` (business-context metric `spent`) |
+| AC-4 | `…::test_ac4_active_registered_in_2024_spent_over_500`, `…::test_ac4_active_registered_in_seed_year_spent_over_500` (business-context metric `spent`) |
 | AC-5 | `…::test_ac5_product_or_discount` |
 | AC-6 | `tests/cohort/test_interpret_api.py::test_ac6_best_customers_asks_and_executes_nothing`, `::test_ac6_guard_turns_undefined_term_into_clarification` |
 | AC-7 | `…::test_ac7_purchased_recently_asks_for_both_terms` |
-| AC-8 | `…::test_ac8_delete_request_rejected_without_llm_or_warehouse`, `::test_ac8_misbehaving_llm_still_rejected`; `tests/unit/cohort/test_guards.py` |
+| AC-8 | `…::test_ac8_delete_request_rejected_without_llm_or_warehouse`, `::test_ac8_misbehaving_llm_cannot_smuggle_sql`; `tests/unit/cohort/test_guards.py` |
 | AC-9 | `…::test_ac9_revenue_question_rejected_as_analytics` |
 | AC-10 | `tests/unit/compiler/test_sql.py::test_same_spec_and_version_compile_byte_identical`, `::test_compilation_independent_of_snapshot_order`; `tests/cohort/test_preview_api.py::test_preview_sql_identical_across_runs` |
 | AC-11 | `tests/unit/compiler/test_validator.py` (each DML/DDL/DCL keyword, multiple statements, CTE with DML, `SELECT … INTO`, `COPY`, `pg_sleep`/`dblink`/`lo_*`, comments, locking clauses, non-allowlisted tables/schemas) |
 | AC-28 | `tests/unit/llm/test_prompt.py::test_prompt_never_contains_credentials_rows_or_pending_use_cases`, `tests/cohort/test_interpret_api.py::test_prompt_and_logs_free_of_credentials` (captured prompt + caplog), `tests/unit/llm/test_client.py::test_api_key_never_logged_or_in_errors` |
 | AC-29 | `tests/cohort/test_cohort_endpoint_security.py` (401, 403 per endpoint, CSRF), route inventory in `tests/auth/test_endpoint_security.py` |
 | AC-30 | `tests/unit/llm/test_client.py::test_switching_cloud_and_local_is_configuration_only` (two configs against an in-process OpenAI-compatible stub) |
-| FR-6 limits | `tests/integration/test_cohort_execution.py::test_compiler_path_timeout_error`, `::test_compiler_path_row_cap_error`; `tests/cohort/test_preview_api.py::test_row_cap_refusal_states_cap` |
+| FR-6 limits | `tests/cohort_reference/test_cohort_execution.py::test_compiler_path_timeout_error`, `::test_compiler_path_row_cap_error`; `tests/cohort/test_preview_api.py::test_row_cap_refusal_states_cap` |
 | FR-7 | `tests/cohort/test_preview_api.py` (count, samples limited to ID + permitted columns, NULL counts, SQL, empty cohort disables split, version change → 409, export-column policy) |
 | BR-6 | `tests/unit/cohort/test_guards.py::test_sequence_wording_is_not_supported_yet`, spec model forbids unknown node types |
 | Draft-0 | `tests/unit/cohort_spec/test_upgrade.py`, `tests/integration/test_migration_cohort_compiler.py` |

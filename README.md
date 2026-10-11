@@ -96,7 +96,7 @@ docker compose exec app cohortsplit crawl --json
 
 The crawler connects as the read-only role. It documents schemas, tables/views,
 columns, types, primary and foreign keys, comments, CHECK value lists and row
-counts. It also generates example use cases (NL request → `draft-0` spec) from
+counts. It also generates example use cases (NL request → cohort spec v1) from
 deterministic templates. Templates the data cannot support are rewritten (e.g.
 "liked product X" → "bought product X") or dropped, with the reason recorded.
 All output is stored in appdb as generated content with status
@@ -148,6 +148,51 @@ Try it locally after `make up` and `docker compose exec app cohortsplit create-a
 --email admin@example.com`: sign in at `http://127.0.0.1:${APP_PORT}`, open
 *Semantic context → Crawler*, run a crawl, add a `canonical_user_id` entry, and confirm
 a use case.
+
+## New cohort (cohort compiler)
+
+The **New cohort** tab (needs `cohort.create`) turns a plain-English request into a
+previewed audience:
+
+1. **Interpret** — the request is sent with one semantic snapshot (confirmed use cases,
+   business context, schema metadata, policy-permitted samples — never credentials or
+   result rows) to the configured LLM, which returns a typed **cohort spec v1**, a
+   clarification question, or a rejection (mutation / analytics / unknown term /
+   unsupported construct). Deterministic code then checks every table, column, join,
+   business term and enumerable value; undefined terms become a question naming them.
+   Nothing is executed. Requests that change data, analytics questions and ordered
+   sequences ("then …") are rejected before the LLM is called.
+2. **Confirm and preview** — confirms the exact spec hash and semantic version (if the
+   business context changed meanwhile you get 409 and interpret again). The SQL is
+   compiled deterministically (same spec + semantic version → byte-identical SQL), all
+   literals are bound parameters, the statement is AST-validated (single read-only
+   `SELECT`, allowlisted tables and functions) and executed only through the read-only
+   role with the statement timeout and row cap. You see the user count, sample rows
+   (canonical id plus columns your roles may export), the read-only SQL and the NULL
+   count per selected export column. An empty cohort cannot be split or exported.
+
+A refusal "define the canonical user identifier in Business context" means no
+`canonical_user_id` entry exists yet. Interpretations and cohort runs are audited
+(`cohort.interpret`, `cohort.run`).
+
+LLM configuration (`COHORTSPLIT_LLM_*`, set `LLM_*` in `.env` for compose). Switching
+between a cloud provider and a local model is configuration only:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `BASE_URL` | — | OpenAI-compatible base URL, e.g. `https://api.openai.com/v1` or `http://host.docker.internal:11434/v1` (Ollama) |
+| `MODEL` | — | model name, e.g. `gpt-4o-mini` or `qwen2.5:7b-instruct` |
+| `API_KEY` | empty | bearer key for cloud providers; never logged |
+| `TIMEOUT_SECONDS` | `60` | per request |
+| `MAX_ATTEMPTS` | `3` | attempts when the output violates the schema |
+| `JSON_MODE` | `true` | send `response_format: json_object`; disable for servers without it |
+
+Local Qwen with Ollama: `ollama pull qwen2.5:7b-instruct`, then in `.env`
+`LLM_BASE_URL=http://host.docker.internal:11434/v1` and `LLM_MODEL=qwen2.5:7b-instruct`
+(no key), `make up`. Cohort settings: `COHORTSPLIT_COHORT_INTERPRETATION_TTL_MINUTES`
+(60), `COHORTSPLIT_COHORT_PREPARED_TTL_MINUTES` (1440),
+`COHORTSPLIT_COHORT_PREVIEW_SAMPLE_SIZE` (20). Rulings:
+[`docs/decisions/0003-cohort-compiler-rulings.md`](docs/decisions/0003-cohort-compiler-rulings.md).
 
 ## Security notes
 
