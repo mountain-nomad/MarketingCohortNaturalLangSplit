@@ -56,7 +56,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function setup(handlers: Record<string, MockResponse>, permissions = ['cohort.create', 'cohort.export']) {
+function setup(handlers: Parameters<typeof mockApi>[0], permissions = ['cohort.create', 'cohort.export']) {
   const calls = mockApi(handlers)
   render(<HistoryTab me={me(permissions)} />)
   return { calls, user: userEvent.setup() }
