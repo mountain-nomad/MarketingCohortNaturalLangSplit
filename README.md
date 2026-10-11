@@ -194,6 +194,81 @@ Local Qwen with Ollama: `ollama pull qwen2.5:7b-instruct`, then in `.env`
 `COHORTSPLIT_COHORT_PREVIEW_SAMPLE_SIZE` (20). Rulings:
 [`docs/decisions/0003-cohort-compiler-rulings.md`](docs/decisions/0003-cohort-compiler-rulings.md).
 
+## Split, export and history (experiment split)
+
+After a non-empty preview, the **New cohort** tab offers the split step (needs
+`cohort.create`; downloading needs `cohort.export`):
+
+1. **Configure** — experiment key (required; 1–100 ASCII letters, digits, `_`, `-`, `.`;
+   it names the files), test share in whole percent (control = 100 − test, each ≥ 1,
+   default 50/50), optional **A/A check** (same assignment, both groups treated alike),
+   and extra export columns — only columns your roles are granted are offered (the
+   canonical user id is always included).
+2. **Split** — the cohort is re-executed read-only (same definition, same `as_of`) and
+   every user is assigned with a fixed, documented hash: SHA-256 of
+   `key || 0x00 || user_id`, first 8 bytes mod 10,000, test if below `test% × 100`. The
+   same key and allocation always put a user in the same group — across runs, restarts
+   and different cohorts. You see the test/control counts; a group with 0 users is
+   flagged and must be confirmed before export. If the business context changed since
+   the preview you get 409 and interpret again.
+3. **Download** — one ZIP: `<key>_test.csv`, `<key>_control.csv`, `manifest.json` (NL
+   request, spec, SQL, semantic version, key, allocation, counts, timestamps, assignment
+   algorithm). Extra columns are fetched at download time and checked against your
+   **current** export grants. Text cells starting with `= + - @`, TAB or CR get a leading
+   `'` (spreadsheet formula guard), so `+4915…` appears as `'+4915…`.
+
+The **History** tab (`cohort.create` or `cohort.read_all`) lists your runs — everyone's
+with `cohort.read_all`. *Download again* (needs `cohort.export`) rebuilds the ZIP from the
+stored membership snapshot (canonical id + group only; runs are never re-executed), so the
+groups are identical; extra columns are fetched again under your current grants (a revoked
+grant is refused — you can still download the ids only), and users deleted from the
+warehouse keep their row with empty extra cells and are counted in the manifest. Someone
+else's run is simply "not found" unless you hold `cohort.read_all`. Splits are audited as
+`cohort.split`, downloads as `cohort.export` / `cohort.redownload`. Rulings:
+[`docs/decisions/0004-experiment-split-rulings.md`](docs/decisions/0004-experiment-split-rulings.md).
+
+## Campaign walkthrough (end to end, demo data)
+
+From a clean clone on a machine with Docker, GNU make and curl:
+
+1. **Configure.** `cp .env.example .env` and replace every `change-me-*` value. Choose an
+   LLM:
+   - *Real model, local:* install [Ollama](https://ollama.com), `ollama pull
+     qwen2.5:7b-instruct`, keep `LLM_BASE_URL=http://host.docker.internal:11434/v1` and
+     `LLM_MODEL=qwen2.5:7b-instruct`.
+   - *Real model, cloud:* `LLM_BASE_URL=https://api.openai.com/v1`, `LLM_MODEL=gpt-4o-mini`,
+     `LLM_API_KEY=sk-…` (any OpenAI-compatible provider works the same way).
+   - *No model (demo stub):* set `COMPOSE_PROFILES=demo`,
+     `LLM_BASE_URL=http://llm-stub:8090/v1`, `LLM_MODEL=cohortsplit-demo-stub`. The stub
+     is deterministic and only understands the requests used below; anything else gets a
+     "use the README requests" clarification.
+2. **Start.** `make up` (builds and waits until healthy), then create the first admin:
+   `docker compose exec app cohortsplit create-admin --email admin@example.com`.
+3. **Sign in** at `http://127.0.0.1:${APP_PORT}` (default port 8000).
+4. **Allow phone export** (optional). *Roles → New role*: name `Phone export`, permission
+   `cohort.export`, exportable column `public.users.phone`, member `admin@example.com`.
+   (The Admin role holds every permission but no column grants.)
+5. **Crawl.** *Semantic context → Crawler → Run crawler* (or `make crawl`).
+6. **Business context.** *Semantic context → Business context → New entry*:
+   - key `customer_id`, kind *Canonical user identifier*, definition
+     `{"kind": "canonical_user_id", "column": "public.users.user_id"}`;
+   - key `paid_order`, kind *Metric*, synonyms `paid for an order`, definition
+     `{"kind": "metric", "table": "public.orders", "filters": [{"column": "public.orders.status", "operator": "in", "value": ["paid", "shipped", "delivered"]}]}`.
+7. **AC-2 request.** *New cohort*: `Users from Kazakhstan who abandoned a cart and never
+   paid for an order` → *Interpret*. The demo data has no Kazakh addresses, so you get a
+   clarification naming the unknown value `KZ` (with a real model you may also get a
+   question); nothing is executed. `Users from Germany who abandoned a cart and never paid
+   for an order` interprets and previews as an **empty** cohort (the demo has no abandoned
+   carts), so split and export stay disabled.
+8. **Split.** *New cohort*: `Users who paid for an order` → *Interpret* → *Confirm and
+   preview* (89 users) → experiment key `push_demo_2026`, 50/50, tick
+   `public.users.phone` → *Split* → *Download ZIP*.
+9. **History.** *History → Download again*: the same groups. Remove `public.users.phone`
+   from the `Phone export` role and try again: the download is refused; *Download user ids
+   only* still works.
+
+`make down` stops the stack (`docker compose down -v` also deletes the data).
+
 ## Security notes
 
 - Never commit `.env`; `.env.example` contains placeholders only.
