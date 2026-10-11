@@ -170,10 +170,19 @@ describe('Dashboard tabs follow effective permissions (AC-A23, AC-A24)', () => {
 
   it('shows placeholder content for tabs delivered by later features', async () => {
     mockApi({ 'GET /api/me': { body: me(['cohort.create']) } })
+    renderAt('/history')
+
+    expect(await screen.findByRole('heading', { name: 'History' })).toBeInTheDocument()
+    expect(screen.getByText(/coming soon/i)).toBeInTheDocument()
+  })
+
+  it('serves the New cohort tab (no longer a placeholder)', async () => {
+    mockApi({ 'GET /api/me': { body: me(['cohort.create']) } })
     renderAt('/cohorts/new')
 
     expect(await screen.findByRole('heading', { name: 'New cohort' })).toBeInTheDocument()
-    expect(screen.getByText(/coming soon/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/describe the audience/i)).toBeInTheDocument()
+    expect(screen.queryByText(/coming soon/i)).not.toBeInTheDocument()
   })
 
   it('serves the Semantic context tab (no longer a placeholder)', async () => {

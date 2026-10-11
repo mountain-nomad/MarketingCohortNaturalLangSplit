@@ -72,7 +72,7 @@ test('shows the interpretation and previews only after explicit confirmation', a
   await user.click(screen.getByRole('button', { name: /confirm and preview/i }))
 
   const result = await screen.findByRole('region', { name: /preview/i })
-  expect(within(result).getByText('3')).toBeInTheDocument()
+  expect(within(result).getByText('Users in cohort').nextElementSibling).toHaveTextContent(/^3$/)
   expect(within(result).getByText(preview.sql)).toBeInTheDocument()
   expect(within(result).getByRole('columnheader', { name: 'public.users.phone' })).toBeInTheDocument()
   expect(within(result).getByText('+491')).toBeInTheDocument()
