@@ -23,6 +23,7 @@ from tests.auth.helpers import (
     make_user,
 )
 from tests.cohort.routes import COHORT_GATED
+from tests.experiment.routes import EXPERIMENT_GATED
 from tests.semantic.routes import SEMANTIC_GATED
 
 PUBLIC = {
@@ -90,10 +91,15 @@ def client_with(app: FastAPI, db: Session, clock: FakeClock, permissions: set[st
 
 
 def test_route_inventory_is_fully_classified(app: FastAPI) -> None:
-    # Semantic-context and cohort endpoints are classified and matrix-tested in
-    # tests/semantic and tests/cohort.
+    # Semantic-context, cohort and experiment endpoints are classified and matrix-tested
+    # in tests/semantic, tests/cohort and tests/experiment.
     assert api_endpoints(app) == (
-        PUBLIC | AUTHENTICATED_ONLY | set(GATED) | set(SEMANTIC_GATED) | set(COHORT_GATED)
+        PUBLIC
+        | AUTHENTICATED_ONLY
+        | set(GATED)
+        | set(SEMANTIC_GATED)
+        | set(COHORT_GATED)
+        | set(EXPERIMENT_GATED)
     )
 
 

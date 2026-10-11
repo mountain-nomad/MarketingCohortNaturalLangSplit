@@ -21,7 +21,7 @@ from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI
 from pydantic import SecretStr
-from sqlalchemy import Engine, create_engine, event, text
+from sqlalchemy import Connection, Engine, create_engine, event, inspect, text
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -133,6 +133,16 @@ DELETE FROM users;
 """
 
 
+# Experiment runs reference their creators (ON DELETE RESTRICT): remove them first.
+EXPERIMENT_TABLES = ("experiment_run_members", "experiment_runs")
+
+
+def delete_experiment_runs(conn: Connection) -> None:
+    for table in EXPERIMENT_TABLES:
+        if inspect(conn).has_table(table):
+            conn.execute(text(f"DELETE FROM {table}"))  # noqa: S608 (fixed table names)
+
+
 @pytest.fixture(params=BACKENDS)
 def engine(request: pytest.FixtureRequest) -> Iterator[Engine]:
     if request.param == "sqlite":
@@ -143,6 +153,7 @@ def engine(request: pytest.FixtureRequest) -> Iterator[Engine]:
     url: URL = request.getfixturevalue("pg_database")
     eng = create_engine(url, connect_args={"connect_timeout": 3})
     with eng.begin() as conn:
+        delete_experiment_runs(conn)
         for statement in filter(None, (s.strip() for s in _PG_CLEANUP.split(";"))):
             conn.execute(text(statement))
     yield eng
