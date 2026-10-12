@@ -609,3 +609,39 @@ textarea.code {
   margin: 0.25rem 0 0;
   padding-left: 1.2rem;
 }
+
+/* --- experiment split and history ---------------------------------------------------- */
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.checkbox input {
+  width: auto;
+}
+
+.field-error {
+  margin: -0.25rem 0 0;
+  color: var(--danger);
+  font-size: 0.85rem;
+}
+
+fieldset.stack {
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.runs td.numbers {
+  white-space: nowrap;
+}
+
+.confirm-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}

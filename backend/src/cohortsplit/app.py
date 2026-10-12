@@ -15,6 +15,7 @@ from cohortsplit.cohort.wiring import install_cohort
 from cohortsplit.config import Settings, load_settings
 from cohortsplit.db import AppDatabaseUnavailableError, check_appdb, create_appdb_engine
 from cohortsplit.db import describe_location as describe_db
+from cohortsplit.experiment.wiring import install_experiment
 from cohortsplit.semantic.wiring import install_semantic
 
 logger = logging.getLogger("cohortsplit")
@@ -102,6 +103,7 @@ def create_app(settings: Settings | None = None, *, engine: Engine | None = None
     install_auth(app, settings, engine)
     install_semantic(app, settings, engine)
     install_cohort(app, settings)
+    install_experiment(app)
     if settings.frontend_dist is not None:
         _mount_frontend(app, settings.frontend_dist)
     return app

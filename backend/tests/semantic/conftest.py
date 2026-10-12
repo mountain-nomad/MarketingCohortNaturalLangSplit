@@ -21,6 +21,8 @@ from tests.integration.conftest import (  # noqa: F401  (warehouse fixtures for 
 )
 
 SEMANTIC_TABLES = (
+    "experiment_run_members",
+    "experiment_runs",
     "business_context_entries",
     "semantic_versions",
     "example_use_cases",

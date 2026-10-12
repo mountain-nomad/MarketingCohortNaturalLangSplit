@@ -13,9 +13,11 @@ from cohortsplit.auth.dependencies import (
     CurrentSession,
     DbSession,
     get_auth_service,
+    get_policy,
     get_request_id,
     get_settings,
 )
+from cohortsplit.auth.policy import PolicyService
 from cohortsplit.auth.service import AuthService
 from cohortsplit.config import Settings
 
@@ -56,6 +58,8 @@ class MeOut(BaseModel):
     is_admin: bool
     roles: list[RoleRefOut]
     permissions: list[str]
+    # Extra columns the caller may export right now (UX hint; downloads re-check, FR-A4).
+    export_columns: list[str]
 
 
 def _cookie_secure(request: Request, settings: Settings) -> bool:
@@ -160,7 +164,12 @@ def change_password(
 
 
 @router.get("/me", response_model=MeOut)
-def me(principal: CurrentPrincipal) -> MeOut:
+def me(
+    principal: CurrentPrincipal,
+    db: DbSession,
+    policy: Annotated[PolicyService, Depends(get_policy)],
+) -> MeOut:
+    exportable = policy.effective_export_columns(db, principal)
     return MeOut(
         id=principal.user_id,
         email=principal.email,
@@ -168,4 +177,5 @@ def me(principal: CurrentPrincipal) -> MeOut:
         is_admin=principal.is_admin,
         roles=[RoleRefOut(id=r.id, name=r.name) for r in principal.roles],
         permissions=sorted(principal.permissions),
+        export_columns=sorted(exportable.granted_columns) if exportable.canonical_user_id else [],
     )
