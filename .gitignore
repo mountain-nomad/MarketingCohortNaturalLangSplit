@@ -25,3 +25,6 @@ coverage/
 # Tooling
 .superpowers/
 .DS_Store
+
+# Local integration-test env (contains local credentials)
+.it-env.sh
